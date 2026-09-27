@@ -1,0 +1,16 @@
+# Local overrides (may contain machine-specific paths)
+local.config.php
+
+# Locally dropped grpcurl binary (install via Homebrew or download a release instead)
+bin/grpcurl
+bin/grpcurl.exe
+
+# Snapshots exported from the dashboard (contain your dish ID and location data)
+starlink-snapshot-*.json
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

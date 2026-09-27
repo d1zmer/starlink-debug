@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starlink Local Debug</title>
+<meta name="description" content="Self-hosted dashboard for a Starlink dish and router, using the dish’s local gRPC API.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230f172a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2338bdf8'/%3E%3Ccircle cx='16' cy='16' r='10' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-dasharray='8 6'/%3E%3C/svg%3E">
+<script>
+  /* Apply the saved theme before first paint to avoid a flash. */
+  try { const m = localStorage.getItem('sld.theme'); if (m === 'light' || m === 'dark') document.documentElement.dataset.theme = m; } catch (e) {}
+</script>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #121933; --panel2: #171f3d; --line: #24305a; --grid: #1e2848;
+    --text: #e6ebff; --muted: #8b95bd; --accent: #38bdf8; --accent2: #a78bfa;
+    --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --down: #38bdf8; --up: #f472b6;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, Segoe UI, Roboto, sans-serif;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f3f5fb; --panel: #ffffff; --panel2: #f6f8fe; --line: #dfe4f3; --grid: #e6eaf5;
+      --text: #111633; --muted: #5b6487; --accent: #0284c7; --accent2: #7c3aed;
+      --ok: #059669; --warn: #d97706; --bad: #dc2626; --down: #0284c7; --up: #db2777;
+      color-scheme: light;
+    }
+  }
+  /* Explicit choice from the theme switcher overrides the OS setting. */
+  :root[data-theme="light"] {
+      --bg: #f3f5fb; --panel: #ffffff; --panel2: #f6f8fe; --line: #dfe4f3; --grid: #e6eaf5;
+      --text: #111633; --muted: #5b6487; --accent: #0284c7; --accent2: #7c3aed;
+      --ok: #059669; --warn: #d97706; --bad: #dc2626; --down: #0284c7; --up: #db2777;
+      color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* components below set display; keep the hidden attribute authoritative */
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }
+  a { color: var(--accent); }
+  header { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; padding: 14px 16px;
+           border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  .brand { font-weight: 700; font-size: 16px; letter-spacing: .2px; display: flex; align-items: center; gap: 8px; }
+  .brand small { color: var(--muted); font-weight: 400; }
+  .conn { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 13px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 25%, transparent); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+  .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+  .menu-wrap { margin-left: auto; position: relative; display: flex; align-items: center; gap: 8px; }
+  .icon-btn { display: flex; align-items: center; justify-content: center; padding: 7px; border-radius: 10px; color: var(--text); }
+  .icon-btn:disabled { opacity: 1; }
+  .icon-btn.spinning svg { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .icon-btn.spinning svg { animation-duration: 2.5s; } }
+  .burger { display: flex; align-items: center; justify-content: center; padding: 7px; border-radius: 10px; color: var(--text); }
+  .burger[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+  .menu-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 25; width: min(300px, calc(100vw - 24px));
+                display: grid; gap: 10px; padding: 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+                box-shadow: 0 14px 40px rgba(0,0,0,.3); animation: fade .12s; }
+  .menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 13px; }
+  .menu-row select { width: 150px; }
+  .menu-btns { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .menu-btns button { font-size: 13px; padding: 7px 8px; }
+  .menu-sep { height: 1px; background: var(--line); margin: 2px 0; }
+  select, button, input[type=text], input[type=search], textarea {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #041018; border-color: transparent; font-weight: 600; }
+  button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+  button.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  button:disabled { opacity: .5; cursor: default; }
+  nav.tabs { display: flex; gap: 4px; padding: 10px 16px 0; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--bg); }
+  nav.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); padding: 8px 12px; white-space: nowrap; }
+  nav.tabs button.active { color: var(--text); border-bottom-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  main { padding: 16px; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+  #banner { margin: 14px 16px 0; display: none; padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--bad) 50%, var(--line));
+            background: color-mix(in srgb, var(--bad) 10%, var(--panel)); }
+  #banner.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); }
+  #banner strong { display: block; }
+  #banner .hint { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  #banner code { font-family: var(--mono); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  .kpi .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  .kpi .v { font-family: var(--mono); font-size: 20px; font-weight: 600; margin-top: 4px; white-space: nowrap; }
+  .kpi .v small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+  .kpi .s { color: var(--muted); font-size: 12px; margin-top: 2px; min-height: 1.2em; }
+  .kpi.warn .v { color: var(--warn); } .kpi.bad .v { color: var(--bad); } .kpi.ok .v { color: var(--ok); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+  .card h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .card h3 .spacer { flex: 1; }
+  .card.wide { grid-column: 1 / -1; }
+  .stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }   /* several cards in one grid column */
+  .stack > .card { flex: 0 0 auto; }
+  .stack > .card:last-child { flex: 1 1 auto; }
+  @media (min-width: 660px) { .card.span-2 { grid-column: span 2; } }
+  @media (min-width: 660px) and (max-width: 959px) { .card.span-3 { grid-column: span 2; } }   /* only 2 columns fit */
+  @media (min-width: 960px) { .card.span-3 { grid-column: span 3; } #tab-raw > .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  .grid.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }   /* two equal halves */
+  @media (max-width: 720px) { .grid.grid-2 { grid-template-columns: 1fr; } }
+  table.kv { width: 100%; border-collapse: collapse; }
+  table.kv td { padding: 4px 0; border-bottom: 1px dashed var(--grid); vertical-align: top; }
+  table.kv td:first-child { color: var(--muted); padding-right: 12px; }      /* column widths follow the content */
+  table.kv td:last-child { font-family: var(--mono); font-size: 13px; white-space: nowrap; text-align: right; }
+  table.kv td.wrapv { white-space: normal; overflow-wrap: anywhere; }   /* long values (IDs, versions) may wrap */
+  .nowrap { white-space: nowrap; }
+  table.kv td:last-child .chip { white-space: nowrap; }
+  table.kv tr:last-child td { border-bottom: 0; }
+  table.list { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.list th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px 6px 0; border-bottom: 1px solid var(--line); }
+  table.list td { padding: 5px 8px 5px 0; border-bottom: 1px dashed var(--grid); font-family: var(--mono); }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-family: var(--mono);
+          background: var(--panel2); border: 1px solid var(--line); margin: 2px 4px 2px 0; }
+  .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+  .chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); background: color-mix(in srgb, var(--bad) 10%, var(--panel2)); }
+  .chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+  .chip.muted { color: var(--muted); }
+  .empty { color: var(--muted); font-style: italic; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); }
+  canvas.chart { width: 100%; height: 210px; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  /* ---- on/off switch (GPS) ---- */
+  .switch-row { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+  .switch { position: relative; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+            background: color-mix(in srgb, var(--muted) 45%, transparent); transition: background .15s; }
+  .switch:hover { border: 0; }
+  .switch .knob { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+                  box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .15s; }
+  .switch[aria-checked="true"] { background: var(--ok); }
+  .switch[aria-checked="true"] .knob { transform: translateX(16px); }
+  .switch[aria-busy="true"] .knob { animation: knobPulse .9s ease-in-out infinite; }
+  .switch:disabled { opacity: .45; cursor: default; }
+  .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @keyframes knobPulse { 50% { opacity: .45; } }
+  .switch-state { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .switch-rows { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; }
+  .switch.warn[aria-checked="true"] { background: var(--warn); }   /* stowed = dish offline */
+  @media (prefers-reduced-motion: reduce) { .switch, .switch .knob { transition: none; } .switch[aria-busy="true"] .knob { animation: none; } }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .row label { color: var(--muted); font-size: 13px; }
+  pre.json { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow: auto;
+             font: 12px/1.5 var(--mono); max-height: 60vh; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  textarea { width: 100%; min-height: 140px; font: 12px/1.5 var(--mono); resize: vertical; }
+  /* JSON tree */
+  .tree { font: 12.5px/1.6 var(--mono); }
+  .tree details { margin-left: 0; }
+  .tree details > .children, .tree details > .leaf { margin-left: 18px; border-left: 1px dashed var(--grid); padding-left: 10px; }
+  .tree summary { cursor: pointer; list-style: none; user-select: none; }
+  .tree summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--muted); }
+  .tree details[open] > summary::before { content: "▾"; }
+  .tree .k { color: var(--accent2); }
+  .tree .k::after { content: ": "; color: var(--muted); }
+  .tree .meta { color: var(--muted); margin-left: 6px; font-size: 11px; }
+  .tree .v.n { color: var(--accent); } .tree .v.s { color: var(--text); } .tree .v.bt { color: var(--ok); } .tree .v.bf { color: var(--bad); } .tree .v.nul { color: var(--muted); }
+  .tree .leaf { padding-left: 14px; }
+  #obsCanvas { width: 100%; max-width: 560px; aspect-ratio: 1; display: block; margin: 0 auto; cursor: crosshair; touch-action: none; }
+  #obsHover { min-height: 1.5em; text-align: center; margin-top: 4px; }
+  .legend i.obs-nodata { background: #05070d; box-shadow: inset 0 0 0 1px var(--line); }
+  .toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+           border-radius: 10px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.35); max-width: 380px; z-index: 20; animation: fade .2s; }
+  .toast.bad { border-left-color: var(--bad); } .toast.ok { border-left-color: var(--ok); }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+  .stamp { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .raw-list { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .raw-list div { padding: 6px 10px; border-bottom: 1px dashed var(--grid); cursor: pointer; font-family: var(--mono); font-size: 12px; display: flex; gap: 10px; white-space: nowrap; overflow: hidden; }
+  .raw-list div span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; }
+  #probe td:last-child { font-size: 12px; }
+  .raw-list div:hover { background: var(--panel2); }
+  .raw-list .ok { color: var(--ok); } .raw-list .bad { color: var(--bad); }
+  /* ---- property help: info icon + tooltip ---- */
+  .info { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin: 0 0 0 5px; padding: 0;
+          border: 0; border-radius: 50%; background: transparent; color: color-mix(in srgb, var(--muted) 80%, transparent);
+          cursor: help; vertical-align: -2px; position: relative; flex: none; }
+  .info svg { width: 15px; height: 15px; display: block; }
+  .info::after { content: ""; position: absolute; inset: -7px; }            /* larger touch target */
+  .info:hover, .info[aria-expanded="true"] { color: var(--accent); border: 0; }
+  .info:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; color: var(--accent); }
+  #tip { position: fixed; z-index: 30; display: none; max-width: 320px; padding: 10px 12px; border-radius: 10px;
+         background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,.35);
+         font: 13px/1.45 var(--sans); text-transform: none; letter-spacing: 0; white-space: normal; text-align: left; }
+  #tip.show { display: block; animation: fade .12s; }
+  #tip .src { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--grid); color: var(--muted); font-size: 12px; }
+  #tip .src a { color: var(--accent); text-decoration: none; }
+  #tip .src a:hover { text-decoration: underline; }
+  .chipwrap { display: inline-flex; align-items: center; margin: 2px 8px 2px 0; }
+  .chipwrap .chip { margin: 0; }
+  .help-slot { display: inline-flex; }
+  /* ---- "About this tab" off-canvas panel ---- */
+  nav.tabs .guide-btn { margin-left: auto; display: flex; align-items: center; padding: 6px 8px; border-radius: 8px; color: var(--muted); background: transparent; border: 0; }
+  nav.tabs .guide-btn:hover, nav.tabs .guide-btn[aria-expanded="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  nav.tabs .guide-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .guide-btn svg { width: 20px; height: 20px; display: block; }
+  .oc-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.4); opacity: 0; transition: opacity .2s; }
+  .oc-backdrop.show { opacity: 1; }
+  .offcanvas { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(400px, 92vw); display: flex; flex-direction: column;
+               background: var(--panel); border-left: 1px solid var(--line); box-shadow: -14px 0 34px rgba(0,0,0,.3);
+               transform: translateX(100%); transition: transform .22s ease; outline: none; }
+  .offcanvas.open { transform: none; }
+  .oc-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .oc-head .oc-icon { color: var(--accent); display: flex; }
+  .oc-head h2 { margin: 0; font-size: 16px; flex: 1; }
+  .oc-close { display: flex; padding: 5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+  .oc-close:hover { color: var(--text); background: var(--panel2); }
+  .oc-body { padding: 16px 18px 24px; overflow: auto; line-height: 1.55; }
+  .oc-body p { margin: 0; }
+  .oc-body h3 { margin: 20px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  .oc-body ul { margin: 0; padding-left: 20px; }
+  .oc-body li { margin: 7px 0; }
+  .oc-tip { margin-top: 20px; padding: 10px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  /* ---- confirmation dialog for actions that change the device ---- */
+  #confirmDlg { width: min(420px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 14px;
+                background: var(--panel); color: var(--text); box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+  #confirmDlg::backdrop { background: rgba(0,0,0,.5); }
+  #confirmDlg[open] { animation: fade .15s; }
+  .dlg { padding: 20px 22px 18px; }
+  .dlg-icon { width: 40px; height: 40px; margin-bottom: 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+  .dlg-icon.info { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .dlg-icon svg { width: 22px; height: 22px; }
+  .dlg h2 { margin: 0 0 6px; font-size: 17px; }
+  .dlg p { margin: 0 0 20px; color: var(--muted); }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .dlg-actions button { padding: 8px 14px; }
+  button.danger-solid { background: var(--bad); color: #fff; border-color: transparent; font-weight: 600; }
+  button.danger-solid:hover { border-color: transparent; filter: brightness(1.08); }
+  @media (prefers-reduced-motion: reduce) { .offcanvas, .oc-backdrop { transition: none; } #confirmDlg[open] { animation: none; } }
+  @media (max-width: 600px) { main { padding: 12px; } header { padding: 10px 12px; } .kpi .v { font-size: 19px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Starlink Local Debug <small>· 192.168.100.1</small></div>
+  <div class="conn"><span class="dot" id="dot"></span><span id="connState">connecting…</span><span class="stamp" id="stamp"></span></div>
+  <div class="menu-wrap">
+    <button type="button" id="btnRefresh" class="icon-btn" data-i18n-aria="btn.refreshNow" data-i18n-title="btn.refreshNow" title="Refresh now" aria-label="Refresh now"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+    <button type="button" id="btnMenu" class="burger" aria-haspopup="true" aria-expanded="false" aria-controls="menuPanel" data-i18n-aria="menu.open" data-i18n-title="menu.open" title="Menu" aria-label="Menu"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <div id="menuPanel" class="menu-panel" hidden>
+      <label class="menu-row"><span data-i18n="hdr.refresh">Refresh</span>
+        <select id="interval">
+          <option value="0" data-i18n="hdr.off">off</option><option value="2000">2 s</option><option value="5000" selected>5 s</option>
+          <option value="10000">10 s</option><option value="30000">30 s</option>
+        </select>
+      </label>
+      <div class="menu-btns">
+        <button id="btnExport" data-i18n="btn.export" data-i18n-title="btn.exportTitle" title="Download a JSON snapshot of everything currently loaded">Export snapshot</button>
+      </div>
+      <div class="menu-sep"></div>
+      <label class="menu-row"><span data-i18n="hdr.theme">Theme</span>
+        <select id="theme">
+          <option value="auto" data-i18n="theme.auto">Auto</option><option value="light" data-i18n="theme.light">Light</option><option value="dark" data-i18n="theme.dark">Dark</option>
+        </select>
+      </label>
+      <label class="menu-row"><span data-i18n="hdr.language">Language</span>
+        <select id="lang"></select>
+      </label>
+    </div>
+  </div>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-tab="overview" class="active" data-i18n="tab.overview">Overview</button>
+  <button data-tab="history" data-i18n="tab.history">History</button>
+  <button data-tab="obstruction" data-i18n="tab.obstruction">Obstruction map</button>
+  <button data-tab="router" data-i18n="tab.router">Router</button>
+  <button data-tab="debug" data-i18n="tab.debug">Debug data</button>
+  <button data-tab="raw" data-i18n="tab.raw">Raw API</button>
+  <button type="button" id="btnGuide" class="guide-btn" aria-controls="guide" aria-expanded="false" data-i18n-title="guide.open" data-i18n-aria="guide.open" title="About this tab" aria-label="About this tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M9.4 9.3a2.7 2.7 0 0 1 5.2.9c0 1.8-2.6 2.4-2.6 4"/><circle cx="12" cy="17.2" r=".6" fill="currentColor"/></svg></button>
+</nav>
+<div id="guideBackdrop" class="oc-backdrop" hidden></div>
+<aside id="guide" class="offcanvas" role="dialog" aria-modal="true" aria-labelledby="guideTitle" tabindex="-1" hidden>
+  <div class="oc-head"><span class="oc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="20" height="20"><circle cx="12" cy="12" r="9.2"/><path d="M9.4 9.3a2.7 2.7 0 0 1 5.2.9c0 1.8-2.6 2.4-2.6 4"/><circle cx="12" cy="17.2" r=".6" fill="currentColor"/></svg></span><h2 id="guideTitle"></h2>
+    <button type="button" id="btnGuideClose" class="oc-close" data-i18n-title="guide.close" data-i18n-aria="guide.close" title="Close" aria-label="Close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="guideBody" class="oc-body"></div>
+</aside>
+<dialog id="confirmDlg" aria-labelledby="dlgTitle" aria-describedby="dlgBody">
+  <form method="dialog" class="dlg">
+    <div id="dlgIcon" class="dlg-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 2.8 19.5h18.4z"/><path d="M12 10v4.2"/><circle cx="12" cy="16.9" r=".7" fill="currentColor"/></svg></div>
+    <h2 id="dlgTitle"></h2>
+    <p id="dlgBody"></p>
+    <div class="dlg-actions"><button id="dlgCancel" value="cancel"></button><button id="dlgOk" value="ok" class="danger-solid"></button></div>
+  </form>
+</dialog>
+<div id="banner"></div>
+<main>
+
+<!-- ============================ OVERVIEW ============================ -->
+<section class="tab active" id="tab-overview">
+  <div class="kpis" id="kpis"></div>
+  <div class="grid">
+    <div class="card span-2"><h3 data-i18n="card.device">Device</h3><div id="device"></div></div>
+    <div class="stack">
+    <div class="card"><h3><span data-i18n="card.alerts">Alerts</span> <span class="spacer"></span><span id="alertCount" class="chip muted">–</span></h3><div id="alerts"></div></div>
+    <div class="card"><h3><span data-i18n="card.ready">Ready states &amp; GPS</span><span class="help-slot" data-help-key="readyStates"></span></h3><div id="ready"></div></div>
+    </div>
+    <div class="card"><h3 data-i18n="card.alignment">Alignment</h3><div id="alignment"></div></div>
+    <div class="card"><h3 data-i18n="card.obsStats">Obstruction stats</h3><div id="obsStats"></div></div>
+    <div class="card"><h3><span data-i18n="card.init">Initialization durations</span><span class="help-slot" data-help-key="initializationDurationSeconds"></span></h3><div id="init"></div></div>
+    <div class="card"><h3 data-i18n="card.context">Context &amp; location</h3><div id="context"></div></div>
+    <div class="card"><h3 data-i18n="card.actions">Actions</h3>
+      <div class="switch-rows" style="margin-top:0"><div class="switch-row">
+        <button type="button" id="gpsSwitch" class="switch" role="switch" aria-checked="false" aria-labelledby="gpsSwitchLabel" aria-describedby="gpsSwitchState" disabled><span class="knob"></span></button>
+        <span id="gpsSwitchLabel" data-i18n="gps.label">GPS</span>
+        <span id="gpsSwitchState" class="switch-state"></span>
+      </div>
+      <div class="switch-row">
+        <button type="button" id="stowSwitch" class="switch warn" role="switch" aria-checked="false" aria-labelledby="stowSwitchLabel" aria-describedby="stowSwitchState" disabled><span class="knob"></span></button>
+        <span id="stowSwitchLabel" data-i18n="stow.label">Stow</span>
+        <span id="stowSwitchState" class="switch-state"></span>
+      </div>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button class="danger" data-action="reboot" data-i18n="act.reboot">Reboot dish</button>
+        <button class="danger" data-action="router_reboot" data-i18n="act.routerReboot">Reboot router</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0;font-size:12px" data-i18n="act.note">Each action asks for confirmation. Reboot takes the connection down for a few minutes; stow/unstow only apply to dishes with motors.</p>
+    </div>
+    <div class="card wide"><h3><span data-i18n="card.env">Environment check</span> <span class="spacer"></span><button id="btnProbe" data-i18n="btn.recheck" style="font-size:12px;padding:3px 8px">Re-check</button></h3><div id="probe" class="empty">…</div></div>
+  </div>
+</section>
+
+<!-- ============================ HISTORY ============================ -->
+<section class="tab" id="tab-history">
+  <div class="row">
+    <label><span data-i18n="hist.window">Window</span>
+      <select id="histSamples"><option value="300" data-i18n="hist.5m">5 min</option><option value="900" selected data-i18n="hist.15m">15 min</option><option value="3600" data-i18n="hist.1h">1 h (if firmware keeps it)</option><option value="0" data-i18n="hist.all">everything</option></select>
+    </label>
+    <span class="stamp" id="histMeta"></span>
+  </div>
+  <div class="grid">
+    <div class="card wide"><h3><span data-i18n="card.throughput">Throughput (Mbps)</span><span class="help-slot" data-help-key="throughput"></span></h3><canvas class="chart" id="chThroughput"></canvas>
+      <div class="legend"><span><i style="background:var(--down)"></i><span data-i18n="legend.download">Download</span></span><span><i style="background:var(--up)"></i><span data-i18n="legend.upload">Upload</span></span></div></div>
+    <div class="card"><h3><span data-i18n="card.latency">Latency to PoP (ms)</span><span class="help-slot" data-help-key="popPingLatencyMs"></span></h3><canvas class="chart" id="chLatency"></canvas></div>
+    <div class="card"><h3><span data-i18n="card.drop">Ping drop rate (%)</span><span class="help-slot" data-help-key="popPingDropRate"></span></h3><canvas class="chart" id="chDrop"></canvas></div>
+    <div class="card"><h3><span data-i18n="card.power">Power draw (W)</span><span class="help-slot" data-help-key="powerIn"></span></h3><canvas class="chart" id="chPower"></canvas><div id="powerNote" class="empty"></div></div>
+    <div class="card"><h3 data-i18n="card.summary">Summary for window</h3><div id="histStats"></div></div>
+    <div class="card wide"><h3><span data-i18n="card.outages">Outages / events in buffer</span><span class="help-slot" data-help-key="outages"></span></h3><div id="outages" class="empty">–</div></div>
+  </div>
+</section>
+
+<!-- ============================ OBSTRUCTION ============================ -->
+<section class="tab" id="tab-obstruction">
+  <div class="grid">
+    <div class="card"><h3><span data-i18n="card.sky">Sky view</span><span class="help-slot" data-help-key="obstructionMap"></span> <span class="spacer"></span><button id="btnObs" data-i18n="btn.reload" style="font-size:12px;padding:3px 8px">Reload</button></h3>
+      <canvas id="obsCanvas" width="480" height="480"></canvas>
+      <div id="obsHover" class="stamp"></div>
+      <div id="obsFrameNote" class="muted" style="font-size:12px;text-align:center;display:none"></div>
+      <div class="legend" style="margin-top:10px;justify-content:center"><span><i style="background:#3b8bff"></i><span data-i18n="legend.clear">Clear</span></span><span><i style="background:#ff4a4a"></i><span data-i18n="legend.obstructed">Obstructed</span></span><span><i class="obs-nodata"></i><span data-i18n="legend.noData">No data yet</span></span></div>
+      <p class="muted" style="font-size:12px" data-i18n="obs.note">Same data as the app's obstruction view. The dish fills this in over ~12 h of operation; a fresh boot shows mostly “no data”.</p></div>
+    <div class="card"><h3 data-i18n="card.mapDetails">Map details</h3><div id="obsInfo" class="empty">–</div></div>
+  </div>
+</section>
+
+<!-- ============================ ROUTER ============================ -->
+<section class="tab" id="tab-router">
+  <div class="row"><span class="muted" data-i18n="router.note">Starlink router at 192.168.1.1. Not available in Bypass Mode or behind a third-party router.</span><button id="btnRouter" data-i18n="btn.reload" style="font-size:12px;padding:3px 8px">Reload</button></div>
+  <div class="grid grid-2">
+    <div class="card"><h3 data-i18n="card.routerDevice">Router device</h3><div id="routerDevice" class="empty">–</div></div>
+    <div class="card"><h3 data-i18n="card.wifi">Wi-Fi status</h3><div id="routerStatus" class="empty">–</div></div>
+    <div class="card wide"><h3><span data-i18n="card.clients">Connected clients</span> <span class="spacer"></span><span id="clientCount" class="chip muted">–</span></h3><div id="routerClients" class="empty">–</div></div>
+  </div>
+</section>
+
+<!-- ============================ DEBUG DATA ============================ -->
+<section class="tab" id="tab-debug">
+  <div class="grid">
+    <div class="card wide">
+      <h3 data-i18n="debug.title">Decode DebugData JSON</h3>
+      <p class="muted" style="margin:0 0 8px;font-size:13px" data-i18n="debug.note">Paste the JSON you copied from the official Starlink app (Settings → Advanced → Debug data → Copy), or a snapshot exported from this page, or open a .json file.</p>
+      <textarea id="debugInput" placeholder='{"dishGetStatus": { ... }}'></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" id="btnDecode" data-i18n="btn.decode">Decode</button>
+        <input type="file" id="debugFile" accept=".json,application/json">
+        <button id="btnUseLive" data-i18n="btn.useLive">Use live data from dish</button>
+        <span class="spacer" style="flex:1"></span>
+        <input type="search" id="treeSearch" placeholder="filter keys / values…" data-i18n-placeholder="debug.filter" style="min-width:200px">
+        <button id="btnExpand" data-i18n="btn.expand">Expand all</button><button id="btnCollapse" data-i18n="btn.collapse">Collapse all</button>
+      </div>
+    </div>
+    <div class="card wide" id="debugSummaryCard" style="display:none"><h3 data-i18n="card.debugSummary">Summary</h3><div id="debugSummary"></div></div>
+    <div class="card wide"><h3 data-i18n="card.tree">Tree</h3><div id="tree" class="tree empty">Nothing decoded yet.</div></div>
+  </div>
+</section>
+
+<!-- ============================ RAW ============================ -->
+<section class="tab" id="tab-raw">
+  <div class="grid">
+    <div class="card span-3">
+      <h3 data-i18n="raw.title">Send a request</h3>
+      <div class="row">
+        <label><span data-i18n="raw.target">Target</span> <select id="rawTarget"><option value="dish">dish 192.168.100.1:9200</option><option value="router">router 192.168.1.1:9000</option></select></label>
+        <label><span data-i18n="raw.preset">Preset</span> <select id="rawPreset"></select></label>
+      </div>
+      <textarea id="rawBody" style="min-height:90px">{"get_status":{}}</textarea>
+      <div class="row" style="margin-top:8px"><button class="primary" id="btnRawSend" data-i18n="btn.send">Send</button><span class="stamp" id="rawMeta"></span></div>
+      <p class="muted" style="font-size:12px;margin:6px 0 0" data-i18n-html="raw.note">Anything under <code>SpaceX.API.Device.Request</code> works here — the proxy re-encodes the JSON and passes it to <code>grpcurl</code>.</p>
+    </div>
+    <div class="card">
+      <h3 data-i18n="raw.recent">Recent calls</h3>
+      <div class="raw-list" id="rawList"></div>
+    </div>
+    <div class="card wide"><h3><span data-i18n="raw.response">Response</span> <span class="spacer"></span><button id="btnCopyRaw" data-i18n="btn.copy" style="font-size:12px;padding:3px 8px">Copy</button></h3><pre class="json" id="rawOut">–</pre></div>
+  </div>
+</section>
+
+</main>
+
+<script src="i18n.js"></script>
+<script src="i18n-help.js"></script>
+<script src="i18n-guide.js"></script>
+<script src="i18n-fields.js"></script>
+<script>
+/* ============================================================
+   Starlink Local Debug — front-end
+   ============================================================ */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const toNum = v => (v === null || v === undefined || v === '') ? NaN : Number(v);
+const isNumLike = v => typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)));
+
+/* ---------- i18n + theme ---------- */
+const STR = window.I18N?.strings || { en: {} };
+const LANGS = (window.I18N?.languages || [{ code: 'en', name: 'English' }]).filter(l => STR[l.code]);
+let lang = 'en';
+const locale = () => (lang === 'zh' ? 'zh-CN' : lang);
+/** Translate `key`, filling {placeholders} from `vars`. Falls back to English, then the key itself. */
+function t(key, vars) {
+  let s = STR[lang]?.[key] ?? STR.en?.[key] ?? key;
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+  return s;
+}
+function detectLang() {
+  try { const saved = localStorage.getItem('sld.lang'); if (saved && STR[saved]) return saved; } catch (_) {}
+  for (const l of (navigator.languages || [navigator.language || 'en'])) {
+    const code = String(l).toLowerCase().split('-')[0];
+    if (STR[code]) return code;
+  }
+  return 'en';
+}
+function applyStatic() {
+  document.documentElement.lang = locale();
+  $$('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  $$('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  $$('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  $$('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  $$('[data-i18n-aria]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
+  if (!$('#guide')?.hidden) renderGuide();
+  fillHelpSlots();
+}
+function setLang(code) {
+  lang = STR[code] ? code : 'en';
+  try { localStorage.setItem('sld.lang', lang); } catch (_) {}
+  hideTip(); applyStatic(); rerenderAll();
+}
+function applyTheme(mode) {
+  if (mode === 'light' || mode === 'dark') document.documentElement.dataset.theme = mode;
+  else delete document.documentElement.dataset.theme;
+}
+function setTheme(mode) {
+  applyTheme(mode);
+  try { localStorage.setItem('sld.theme', mode); } catch (_) {}
+  redrawCharts();
+}
+/** Canvas charts read CSS colours at draw time, so redraw them after a theme change. */
+function redrawCharts() { if (state.history) renderHistory(state.history); }
+/** Re-render everything from cached data (used after a language change). */
+function rerenderAll() {
+  renderGpsSwitch();
+  if (state.status) renderOverview(getStatusObj(state.status));
+  else $('#connState').textContent = state.unreachable ? t('conn.unreachable') : t('conn.connecting');
+  if (state.history) renderHistory(state.history);
+  if (state.obstruction) renderObstruction(state.obstruction);
+  renderRouter();
+  renderTree();
+  if (state.decodedText) decodeDebug(state.decodedText, true);
+  if (state.probe) renderProbe(state.probe);
+}
+
+/* ---------- property help (info icon + tooltip) ---------- */
+const HELP_META = window.HELP_META || {};
+const HELP_SOURCES = window.HELP_SOURCES || {};
+const HELP_ALIAS = { obstructionFraction: 'fractionObstructed' };
+const helpKey = k => HELP_ALIAS[k] || k;
+const hasHelp = k => helpKey(k) in HELP_META;
+const INFO_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.9" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="4.9" r="0.95" fill="currentColor"/><path d="M8 7.2v4.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+/** Small (i) button; the tooltip text is looked up lazily from `key`. */
+function infoIcon(key, label) {
+  const aria = t('help.ui.aria') + (label ? ` — ${label}` : '');
+  return `<button type="button" class="info" data-help="${esc(key)}" aria-label="${esc(aria)}" aria-expanded="false">${INFO_SVG}</button>`;
+}
+/** Label text with its (i) icon glued to the last word, so the icon never wraps onto a line of its own. */
+function withIcon(label, key) {
+  const str = String(label), i = str.search(/\S+$/);
+  const head = i > 0 ? str.slice(0, i) : '', last = i >= 0 ? str.slice(i) : str;
+  return `${esc(head)}<span class="nowrap">${esc(last)}${infoIcon(key, str)}</span>`;
+}
+function helpHTML(key) {
+  const k = helpKey(key);
+  return `<div>${esc(HELP_META[k] ? t('help.' + k) : t('help.ui.generic'))}</div>`;
+}
+const tip = document.createElement('div');
+tip.id = 'tip'; tip.setAttribute('role', 'tooltip');
+document.body.appendChild(tip);
+let tipFor = null, tipPinned = false, tipHideTimer = null, tipScope = null, tipSkipFocus = false;
+function positionTip(btn) {
+  tip.style.maxWidth = Math.min(320, window.innerWidth - 24) + 'px';
+  tip.style.left = '0px'; tip.style.top = '0px';
+  const r = btn.getBoundingClientRect(), tr = tip.getBoundingClientRect();
+  let left = r.left + r.width / 2 - tr.width / 2;
+  left = Math.max(12, Math.min(left, window.innerWidth - tr.width - 12));
+  let top = r.bottom + 8;
+  if (top + tr.height > window.innerHeight - 8) top = r.top - tr.height - 8;
+  tip.style.left = `${Math.round(left)}px`; tip.style.top = `${Math.round(Math.max(8, top))}px`;
+}
+function showTip(btn, pin) {
+  clearTimeout(tipHideTimer);
+  if (tipFor && tipFor !== btn) { tipFor.setAttribute('aria-expanded', 'false'); tipFor.removeAttribute('aria-describedby'); }
+  tipFor = btn; tipPinned = !!pin; tipScope = btn.parentElement?.closest('[id]')?.id || null;
+  tip.innerHTML = helpHTML(btn.dataset.help);
+  btn.setAttribute('aria-expanded', 'true'); btn.setAttribute('aria-describedby', 'tip');
+  tip.classList.add('show'); positionTip(btn);
+}
+function hideTip() {
+  clearTimeout(tipHideTimer);
+  if (tipFor) { tipFor.setAttribute('aria-expanded', 'false'); tipFor.removeAttribute('aria-describedby'); }
+  tipFor = null; tipPinned = false; tip.classList.remove('show');
+}
+/** Panels re-render every few seconds; move an open tooltip onto the fresh copy of its icon. */
+function rebindTip() {
+  if (!tipFor || tipFor.isConnected) return;
+  const scope = (tipScope && document.getElementById(tipScope)) || document;
+  const again = scope.querySelector(`.info[data-help="${CSS.escape(tipFor.dataset.help)}"]`);
+  if (!again) { hideTip(); return; }
+  tipFor = again; again.setAttribute('aria-expanded', 'true'); again.setAttribute('aria-describedby', 'tip'); positionTip(again);
+}
+new MutationObserver(() => { if (tipFor && !tipFor.isConnected) rebindTip(); }).observe(document.querySelector('main'), { childList: true, subtree: true });
+document.addEventListener('mouseover', e => {
+  const b = e.target.closest?.('.info');
+  if (b) { if (!tipPinned || tipFor !== b) { if (!tipPinned) showTip(b, false); } clearTimeout(tipHideTimer); }
+  else if (e.target.closest?.('#tip')) clearTimeout(tipHideTimer);
+});
+document.addEventListener('mouseout', e => {
+  if (tipPinned) return;
+  if (e.target.closest?.('.info, #tip')) { clearTimeout(tipHideTimer); tipHideTimer = setTimeout(hideTip, 250); }
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest('.info');
+  if (b) { e.preventDefault(); e.stopPropagation(); if (tipFor === b && tipPinned) hideTip(); else showTip(b, true); return; }
+  if (tipFor && !e.target.closest('#tip')) hideTip();
+});
+document.addEventListener('focusin', e => { if (tipSkipFocus) { tipSkipFocus = false; return; } const b = e.target.closest?.('.info'); if (b && !tipPinned) showTip(b, false); });
+document.addEventListener('focusout', e => {
+  if (!e.target.closest?.('.info') || tipPinned) return;
+  tipHideTimer = setTimeout(() => { if (!tip.contains(document.activeElement)) hideTip(); }, 150);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && tipFor) { const b = tipFor; hideTip(); if (document.activeElement !== b) { tipSkipFocus = true; b.focus(); } } });
+window.addEventListener('scroll', () => { if (tipFor) positionTip(tipFor); }, true);
+window.addEventListener('resize', () => { if (tipFor) positionTip(tipFor); });
+function fillHelpSlots() { $$('.help-slot').forEach(el => { el.innerHTML = infoIcon(el.dataset.helpKey, el.previousElementSibling?.textContent || ''); }); }
+
+const state = {
+  status: null, deviceInfo: null, history: null, obstruction: null, context: null, location: null,
+  router: { status: null, clients: null, info: null }, probe: null,
+  lastOk: null, calls: [], timer: null, tick: 0, decoded: null, decodedText: null, unreachable: false,
+};
+
+/* ---------- API ---------- */
+async function api(cmd, { method = 'GET', body = null, query = '' } = {}) {
+  const headers = {};
+  if (method === 'POST') { headers['X-Starlink-Debug'] = '1'; headers['Content-Type'] = 'application/json'; }
+  const t0 = performance.now();
+  let res, j;
+  try {
+    res = await fetch(`api.php?cmd=${encodeURIComponent(cmd)}${query}`, { method, headers, body: body ? JSON.stringify(body) : null, cache: 'no-store' });
+  } catch (e) {
+    throw { error: t('err.noApi'), hint: String(e) };
+  }
+  try { j = await res.json(); }
+  catch (e) { throw { error: t('err.notJson', { status: res.status }) }; }
+  recordCall(cmd, j, performance.now() - t0);
+  if (!j.ok) throw j;
+  return j;
+}
+function recordCall(cmd, j, ms) {
+  state.calls.unshift({ t: new Date(), cmd, ok: !!j.ok, ms: j.ms ?? Math.round(ms), res: j });
+  state.calls.length = Math.min(state.calls.length, 40);
+  renderRawList();
+}
+
+/* ---------- formatting ---------- */
+function fmtNum(n, d = 1) { n = toNum(n); if (!Number.isFinite(n)) return '–'; return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(d); }
+function mbps(bps) { const n = toNum(bps); return Number.isFinite(n) ? (n / 1e6).toFixed(n >= 1e8 ? 0 : 1) : '–'; }
+function pct(f, d = 2) { const n = toNum(f); return Number.isFinite(n) ? (n * 100).toFixed(d) : '–'; }
+function fmtDur(s) {
+  s = Math.round(toNum(s)); if (!Number.isFinite(s)) return '–';
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  if (d) return `${d}d ${h}h ${m}m`; if (h) return `${h}h ${m}m ${sec}s`; if (m) return `${m}m ${sec}s`; return `${sec}s`;
+}
+function fmtAgo(s) { if (s < 60) return `${s}s`; if (s < 600) { const m = Math.floor(s / 60), r = s % 60; return r ? `${m}m${r}s` : `${m}m`; } return `${Math.round(s / 60)}m`; }
+function chip(text, cls = '') { return `<span class="chip ${cls}">${esc(text)}</span>`; }
+function boolChip(v, goodWhen = true) { const b = (v === true || v === 'true'); return chip(b ? t('common.yes') : t('common.no'), b === goodWhen ? 'ok' : 'bad'); }
+/** Translated label for an API field name; falls back to a humanised key. */
+function humanKey(k) {
+  const f = STR[lang]?.['f.' + k] ?? STR.en?.['f.' + k];
+  if (f) return f;
+  return String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+}
+/** Readable, translated name for a device status code such as FILTER_CONVERGED (null if unknown). */
+const enumLabel = v => (typeof v === 'string' && /^[A-Z][A-Z0-9_]+$/.test(v)) ? (STR[lang]?.['v.' + v] ?? STR.en?.['v.' + v] ?? null) : null;
+/** HTML for a status code: translated text, original code kept in the hover title. */
+function fmtEnum(v) { const l = enumLabel(v); return l ? `<span title="${esc(v)}">${esc(l)}</span>` : esc(v); }
+/** Format a value based on hints in its key name. */
+function fmtByKey(k, v) {
+  if (v === null || v === undefined || v === 'NaN' || (typeof v === 'number' && Number.isNaN(v))) return '<span class="muted">–</span>';
+  if (typeof v === 'boolean') return boolChip(v);
+  if (typeof v === 'object') return `<span class="muted">${Array.isArray(v) ? `[${v.length}]` : '{…}'}</span>`;
+  const key = String(k);
+  if (isNumLike(v)) {
+    const n = Number(v);
+    if (/Bps$/.test(key)) return `${mbps(n)} Mbps`;
+    if (/Mbps$/.test(key)) return `${fmtNum(n, 0)} Mbps`;
+    if (/Ms$/.test(key)) return `${fmtNum(n)} ms`;
+    if (/(S|Seconds)$/.test(key) && !/Sats$/.test(key)) return fmtDur(n) + (Math.abs(n) < 600 && n % 1 ? ` (${n.toFixed(2)}s)` : '');
+    if (/Deg$/.test(key)) return `${fmtNum(n)}°`;
+    if (/(fraction|Rate)/i.test(key) && n >= 0 && n <= 1) return `${pct(n)} %`;
+    if (/Ns$/.test(key)) return `${fmtNum(n / 1e9)} s`;
+    return Number.isInteger(n) ? String(n) : fmtNum(n, 3);
+  }
+  return fmtEnum(v);
+}
+function kvTable(obj, opts = {}) {
+  if (!obj || typeof obj !== 'object') return `<div class="empty">${esc(t('common.noData'))}</div>`;
+  const rows = [];
+  const keys = opts.keys || Object.keys(obj);
+  for (const k of keys) {
+    if (!(k in obj)) continue;
+    const v = obj[k];
+    if (opts.skipObjects && v && typeof v === 'object') continue;
+    const label = opts.labels?.[k] || humanKey(k);
+    const hk = hasHelp(k) ? k : (opts.helpDefault || k);
+    rows.push(`<tr><td>${opts.noHelp ? esc(label) : withIcon(label, hk)}</td><td${String(v ?? '').length > 22 ? ' class="wrapv"' : ''}>${opts.fmt && isNumLike(v) ? esc(opts.fmt(v)) : fmtByKey(k, v)}</td></tr>`);
+  }
+  return rows.length ? `<table class="kv">${rows.join('')}</table>` : `<div class="empty">${esc(t('common.noData'))}</div>`;
+}
+function toast(msg, cls = '') {
+  const t = document.createElement('div'); t.className = `toast ${cls}`; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 5000);
+}
+function banner(html, cls = '') { const b = $('#banner'); if (!html) { b.style.display = 'none'; return; } b.className = cls; b.innerHTML = html; b.style.display = 'block'; }
+function download(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+
+/* ---------- status helpers ---------- */
+function getStatusObj(data) { return data?.dishGetStatus || data; }
+function dishState(s) {
+  if (!s) return 'UNKNOWN';
+  if (s.stowRequested) return 'STOWED';
+  if (s.state) return s.state;
+  if (s.outage?.cause) return s.outage.cause;
+  return 'CONNECTED';
+}
+function stateClass(st) { if (st === 'CONNECTED') return 'ok'; if (['UNKNOWN', 'ERROR'].includes(st)) return 'bad'; return 'warn'; }
+
+/* ---------- OVERVIEW ---------- */
+function renderOverview(s) {
+  const st = dishState(s);
+  $('#dot').className = `dot ${stateClass(st)}`;
+  syncGpsFromStatus(s);
+  $('#connState').textContent = enumLabel(st) || st; $('#connState').title = st;
+  $('#stamp').textContent = t('ov.updated', { time: new Date().toLocaleTimeString(locale()) });
+
+  const drop = toNum(s.popPingDropRate), obs = toNum(s.obstructionStats?.fractionObstructed), lat = toNum(s.popPingLatencyMs);
+  const tiles = [
+    { h: 'downlinkThroughputBps', l: t('kpi.download'), v: mbps(s.downlinkThroughputBps), u: 'Mbps', s: t('kpi.current') },
+    { h: 'uplinkThroughputBps', l: t('kpi.upload'), v: mbps(s.uplinkThroughputBps), u: 'Mbps', s: t('kpi.current') },
+    { h: 'popPingLatencyMs', l: t('kpi.latency'), v: fmtNum(lat), u: 'ms', s: t('kpi.toPop'), c: lat > 100 ? 'warn' : '' },
+    { h: 'popPingDropRate', l: t('kpi.drop'), v: pct(drop, 1), u: '%', s: t('kpi.lastSample'), c: drop > 0.05 ? 'bad' : drop > 0 ? 'warn' : '' },
+    { h: 'fractionObstructed', l: t('kpi.obstructed'), v: pct(obs, 2), u: '%', s: t('kpi.valid', { d: fmtDur(s.obstructionStats?.validS) }), c: obs > 0.02 ? 'bad' : obs > 0.005 ? 'warn' : '' },
+    { h: 'uptimeS', l: t('kpi.uptime'), v: fmtDur(s.deviceState?.uptimeS), u: '', s: t('kpi.boots', { n: s.deviceInfo?.bootcount ?? '–' }) },
+    { h: 'gpsSats', l: t('kpi.gps'), v: s.gpsStats?.gpsSats ?? '–', u: t('kpi.sats'), s: s.gpsStats?.gpsValid ? t('kpi.fixValid') : t('kpi.noFix'), c: s.gpsStats?.gpsValid ? '' : 'warn' },
+    { h: 'ethSpeedMbps', l: t('kpi.ethernet'), v: s.ethSpeedMbps ?? '–', u: 'Mbps', s: t('kpi.linkSpeed'), c: toNum(s.ethSpeedMbps) < 1000 ? 'warn' : '' },
+  ];
+  $('#kpis').innerHTML = tiles.map(t => `<div class="kpi ${t.c || ''}"><div class="l">${withIcon(t.l, t.h)}</div><div class="v">${esc(t.v)}<small>${esc(t.u)}</small></div><div class="s">${esc(t.s)}</div></div>`).join('');
+
+  const di = s.deviceInfo || {};
+  $('#device').innerHTML = kvTable({
+    id: di.id, hardwareVersion: di.hardwareVersion, softwareVersion: di.softwareVersion, boardRev: di.boardRev, countryCode: di.countryCode,
+    generationNumber: di.generationNumber, utcOffsetS: di.utcOffsetS, bootcount: di.bootcount, isDev: di.isDev,
+    classOfService: s.classOfService, mobilityClass: s.mobilityClass, softwareUpdateState: s.softwareUpdateState,
+    disablementCode: s.disablementCode, hasActuators: s.hasActuators, isSnrAboveNoiseFloor: s.isSnrAboveNoiseFloor,
+    secondsToFirstNonemptySlot: s.secondsToFirstNonemptySlot, isCellDisabled: s.isCellDisabled,
+  }, { labels: { id: t('lbl.dishId'), utcOffsetS: t('lbl.utcOffset'), bootcount: t('lbl.bootCount'), isDev: t('lbl.devUnit'), secondsToFirstNonemptySlot: t('lbl.nextSlot') } });
+
+  const alerts = s.alerts || {};
+  const keys = Object.keys(alerts).sort((a, b) => (alerts[b] === true) - (alerts[a] === true) || a.localeCompare(b));
+  const active = keys.filter(k => alerts[k] === true);
+  $('#alertCount').className = `chip ${active.length ? 'bad' : 'ok'}`;
+  $('#alertCount').textContent = active.length ? t('alerts.active', { n: active.length }) : t('common.none');
+  $('#alerts').innerHTML = keys.length ? keys.map(k => `<span class="chipwrap">${chip(humanKey(k), alerts[k] === true ? 'bad' : 'muted')}${infoIcon(k, humanKey(k))}</span>`).join('')
+    : `<div class="empty">${esc(t('alerts.noFields'))}</div>`;
+  if (s.outage) $('#alerts').innerHTML += `<div style="margin-top:8px">${kvTable(s.outage)}</div>`;
+
+  const rs = s.readyStates || {};
+  $('#ready').innerHTML = (Object.keys(rs).length ? Object.keys(rs).map(k => `<span class="chipwrap">${chip(`${k}: ${rs[k] ? t('ready.ready') : t('ready.notReady')}`, rs[k] ? 'ok' : 'bad')}${infoIcon(hasHelp('rs_' + k) ? 'rs_' + k : 'readyStates', k)}</span>`).join('') : `<div class="empty">${esc(t('ready.noFields'))}</div>`)
+    + `<div style="margin-top:10px">${kvTable(s.gpsStats || {}, { labels: { gpsValid: t('lbl.gpsValid'), gpsSats: t('lbl.satellites'), noSatsAfterTtff: t('lbl.noSatsAfterTtff'), inhibitGps: t('lbl.gpsInhibited') } })}</div>`;
+
+  const al = { ...(s.alignmentStats || {}) };
+  if (s.boresightAzimuthDeg !== undefined) al.boresightAzimuthDeg ??= s.boresightAzimuthDeg;
+  if (s.boresightElevationDeg !== undefined) al.boresightElevationDeg ??= s.boresightElevationDeg;
+  $('#alignment').innerHTML = kvTable(al);
+  $('#obsStats').innerHTML = kvTable(s.obstructionStats || {}, { labels: { fractionObstructed: t('lbl.fractionObstructed'), validS: t('lbl.validDuration'), avgProlongedObstructionDurationS: t('lbl.avgProlongedDuration'), avgProlongedObstructionIntervalS: t('lbl.avgProlongedInterval'), avgProlongedObstructionValid: t('lbl.prolongedValid'), timeObstructed: t('lbl.timeObstructed'), patchesValid: t('lbl.patchesValid') } });
+  $('#init').innerHTML = kvTable(s.initializationDurationSeconds || {}, { helpDefault: 'initializationDurationSeconds', fmt: v => fmtDur(v) });
+  renderContext();
+}
+function renderContext() {
+  const c = state.context?.dishGetContext || {};
+  const loc = state.location?.getLocation;
+  let html = kvTable({ cellId: c.cellId, polPopId: c.polPopId, initialSatelliteId: c.initialSatelliteId, initialGatewayId: c.initialGatewayId, onBackupBeam: c.onBackupBeam,
+    secondsSinceLastSlot: c.secondsSinceLastSlot, secondsToNextSlot: c.secondsToNextSlot, polDurationS: c.polDurationS, obstructionFraction: c.obstructionFraction, secondsSinceHardwareConfigured: c.secondsSinceHardwareConfigured },
+    { labels: { cellId: t('lbl.cellId'), polPopId: t('lbl.popId'), polDurationS: t('lbl.polDuration') } });
+  if (loc?.lla) html += `<div style="margin-top:8px">${kvTable({ latitude: loc.lla.lat, longitude: loc.lla.lon, altitudeM: loc.lla.alt, source: loc.source, sigmaM: loc.sigmaM })}</div>`;
+  else if (state.location === null) html += `<div class="muted" style="font-size:12px;margin-top:8px">${esc(t('ctx.noLocation'))}</div>`;
+  $('#context').innerHTML = html;
+}
+
+/* ---------- charts ---------- */
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function lineChart(canvas, series, opts = {}) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth || 600, H = canvas.clientHeight || 210;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  const padL = 46, padR = 10, padT = 10, padB = 22;
+  const n = Math.max(1, ...series.map(s => s.data.length));
+  let min = Infinity, max = -Infinity, any = false;
+  for (const s of series) for (const v of s.data) if (Number.isFinite(v)) { any = true; min = Math.min(min, v); max = Math.max(max, v); }
+  if (!any) { ctx.fillStyle = cssVar('--muted'); ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(t('common.noData'), W / 2, H / 2); return; }
+  if (opts.yMin !== undefined) min = opts.yMin; else if (min > 0) min = 0;
+  if (opts.yMax !== undefined) max = opts.yMax; else max = max * 1.05;
+  if (max <= min) max = min + 1;
+  const x = i => padL + (n <= 1 ? 0 : i / (n - 1)) * (W - padL - padR);
+  const y = v => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
+  ctx.font = '11px ' + cssVar('--mono'); ctx.strokeStyle = cssVar('--grid'); ctx.lineWidth = 1; ctx.fillStyle = cssVar('--muted');
+  for (let t = 0; t <= 4; t++) {
+    const v = min + (max - min) * t / 4, yy = y(v);
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText(v >= 100 ? v.toFixed(0) : v.toFixed(1), padL - 6, yy + 4);
+  }
+  ctx.textAlign = 'center';
+  for (let k = 0; k <= 4; k++) { const i = Math.round((n - 1) * k / 4); const ago = n - 1 - i; ctx.textAlign = k === 4 ? 'right' : 'center'; ctx.fillText(ago === 0 ? t('chart.now') : `-${fmtAgo(ago)}`, x(i), H - 6); }
+  for (const s of series) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.5; ctx.beginPath(); let pen = false;
+    s.data.forEach((v, i) => { if (!Number.isFinite(v)) { pen = false; return; } const xx = x(i), yy = y(v); if (!pen) { ctx.moveTo(xx, yy); pen = true; } else ctx.lineTo(xx, yy); });
+    ctx.stroke();
+    if (s.fill) { ctx.globalAlpha = .12; ctx.fillStyle = s.color; ctx.lineTo(x(n - 1), y(min)); ctx.lineTo(x(0), y(min)); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; }
+  }
+}
+function seriesStats(arr) {
+  const v = arr.filter(Number.isFinite); if (!v.length) return null;
+  let min = Infinity, max = -Infinity, sum = 0; for (const x of v) { if (x < min) min = x; if (x > max) max = x; sum += x; }
+  return { min, max, avg: sum / v.length, last: v[v.length - 1], n: v.length };
+}
+
+/* ---------- HISTORY ---------- */
+function renderHistory(data) {
+  const h = data?.dishGetHistory; if (!h) return;
+  const dl = (h.downlinkThroughputBps || []).map(v => toNum(v) / 1e6);
+  const ul = (h.uplinkThroughputBps || []).map(v => toNum(v) / 1e6);
+  const lat = (h.popPingLatencyMs || []).map(toNum);
+  const drop = (h.popPingDropRate || []).map(v => toNum(v) * 100);
+  const pw = (h.powerIn || []).map(toNum);
+  const meta = h._meta || {};
+  $('#histMeta').textContent = t('hist.meta', { n: meta.returned ?? dl.length, b: meta.bufferSize ?? '?', c: meta.current ?? '?' });
+  lineChart($('#chThroughput'), [{ data: dl, color: cssVar('--down'), fill: true }, { data: ul, color: cssVar('--up') }]);
+  lineChart($('#chLatency'), [{ data: lat, color: cssVar('--accent2'), fill: true }]);
+  lineChart($('#chDrop'), [{ data: drop, color: cssVar('--bad'), fill: true }], { yMin: 0, yMax: 100 });
+  if (pw.some(Number.isFinite)) { lineChart($('#chPower'), [{ data: pw, color: cssVar('--warn'), fill: true }]); $('#powerNote').textContent = ''; }
+  else { $('#chPower').getContext('2d').clearRect(0, 0, 9999, 9999); $('#powerNote').textContent = t('hist.noPower'); }
+
+  const rows = [[t('hist.rowDownload'), seriesStats(dl), 'downlinkThroughputBps'], [t('hist.rowUpload'), seriesStats(ul), 'uplinkThroughputBps'], [t('hist.rowLatency'), seriesStats(lat), 'popPingLatencyMs'], [t('hist.rowDrop'), seriesStats(drop), 'popPingDropRate'], [t('hist.rowPower'), seriesStats(pw), 'powerIn']]
+    .filter(([, s]) => s);
+  const dropSecs = drop.filter(v => v > 0).length, fullDrop = drop.filter(v => v >= 100).length;
+  $('#histStats').innerHTML = `<table class="list"><tr><th>${esc(t('hist.metric'))}</th><th>${esc(t('hist.avg'))}</th><th>${esc(t('hist.min'))}</th><th>${esc(t('hist.max'))}</th><th>${esc(t('hist.last'))}</th></tr>` +
+    rows.map(([n, s, hk]) => `<tr><td style="font-family:var(--sans)">${withIcon(n, hk)}</td><td>${fmtNum(s.avg)}</td><td>${fmtNum(s.min)}</td><td>${fmtNum(s.max)}</td><td>${fmtNum(s.last)}</td></tr>`).join('') +
+    `</table><div class="muted" style="margin-top:8px;font-size:12px">${t('hist.loss', { any: dropSecs, full: fullDrop, total: drop.length })}</div>`;
+
+  const out = h.outages;
+  if (Array.isArray(out) && out.length) {
+    $('#outages').className = '';
+    $('#outages').innerHTML = `<table class="list"><tr><th>${esc(t('out.cause'))}</th><th>${esc(t('out.start'))}</th><th>${esc(t('out.duration'))}</th><th>${esc(t('out.switched'))}</th></tr>` + out.slice().reverse().map(o => {
+      const ns = toNum(o.startTimestampNs); const start = ns > 1e17 ? new Date(ns / 1e6).toLocaleString(locale()) : `${fmtDur(ns / 1e9)} (${t('out.relative')})`;
+      return `<tr><td>${fmtEnum(o.cause)}</td><td>${esc(start)}</td><td>${fmtDur(toNum(o.durationNs) / 1e9)}</td><td>${o.didSwitch ? esc(t('common.yes')) : esc(t('common.no'))}</td></tr>`;
+    }).join('') + '</table>';
+  } else { $('#outages').className = 'empty'; $('#outages').textContent = Array.isArray(out) ? t('out.none') : t('out.unsupported'); }
+}
+
+/* ---------- OBSTRUCTION MAP ---------- */
+/* Obstruction map, drawn like the Starlink app: a round sky view seen from the dish,
+   zenith in the centre, the horizon limit (maxThetaDeg from zenith) at the edge, north up.
+   Blue = satellites were heard from that direction, red = signal interrupted, black = no data. */
+const OBS_COL = { disc: '#05070d', ring: 'rgba(255,255,255,.13)', label: 'rgba(255,255,255,.55)', north: '#ffffff' };
+function obsColor(v) {
+  const k = Math.max(0, Math.min(1, (v - 0.25) / 0.5));   // mostly two-tone, like the app
+  const a = [0xff, 0x4a, 0x4a], b = [0x3b, 0x8b, 0xff];
+  return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * k)).join(',')})`;
+}
+function renderObstruction(data) {
+  const m = data?.dishGetObstructionMap; if (!m) return;
+  const rows = toNum(m.numRows), cols = toNum(m.numCols), snr = (m.snr || []).map(toNum);
+  const frame = String(m.mapReferenceFrame ?? m.referenceFrame ?? '');
+  let obstructed = 0, known = 0;
+  for (const v of snr) if (Number.isFinite(v) && v >= 0) { known++; if (v < 0.5) obstructed++; }
+  state.obsGeom = { rows, cols, snr, frame, maxTheta: toNum(m.maxThetaDeg) > 0 ? toNum(m.maxThetaDeg) : 90 };
+  drawObstruction();
+  $('#obsInfo').className = '';
+  $('#obsInfo').innerHTML = kvTable({ numRows: rows, numCols: cols, cellsWithData: known, cellsObstructed: obstructed, fractionObstructedInMap: known ? obstructed / known : null,
+    minElevationDeg: m.minElevationDeg, maxThetaDeg: m.maxThetaDeg, referenceFrame: frame || undefined },
+    { labels: { numRows: t('obs.rows'), numCols: t('obs.cols'), cellsWithData: t('obs.cellsWithData'), cellsObstructed: t('obs.cellsObstructed'), fractionObstructedInMap: t('obs.fraction'), minElevationDeg: t('obs.minElevation'), maxThetaDeg: t('obs.maxTheta'), referenceFrame: t('obs.refFrame') } });
+}
+function obsLayout(cv) {
+  const W = cv.clientWidth || 480, pad = Math.max(22, W * 0.06);
+  return { W, cx: W / 2, cy: W / 2, R: W / 2 - pad };
+}
+function drawObstruction() {
+  const g = state.obsGeom, cv = $('#obsCanvas'); if (!g || !cv) return;
+  const { W, cx, cy, R } = obsLayout(cv), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(W * dpr);
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, W);
+  const TAU = Math.PI * 2, relative = /UT/i.test(g.frame) && !/EARTH/i.test(g.frame);
+
+  // sky disc
+  ctx.fillStyle = OBS_COL.disc; ctx.beginPath(); ctx.arc(cx, cy, R + 4, 0, TAU); ctx.fill();
+
+  // measurement dots, batched by colour; a soft glow like the app
+  const { rows, cols, snr } = g, cell = R / (cols / 2), dot = cell * 0.6, buckets = new Map();
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const v = snr[r * cols + c]; if (!Number.isFinite(v) || v < 0) continue;
+    const x = cx + (c + 0.5 - cols / 2) * cell, y = cy + (r + 0.5 - rows / 2) * cell;
+    const col = obsColor(v); let p = buckets.get(col); if (!p) buckets.set(col, p = new Path2D());
+    p.moveTo(x + dot, y); p.arc(x, y, dot, 0, TAU);
+  }
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R + 4, 0, TAU); ctx.clip();
+  ctx.shadowBlur = Math.max(3, cell * 1.4);
+  for (const [col, p] of buckets) { ctx.shadowColor = col; ctx.fillStyle = col; ctx.fill(p); }
+  ctx.restore();
+
+  // elevation rings (every 30°) + the horizon limit, and faint cross-hairs
+  ctx.strokeStyle = OBS_COL.ring; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+  ctx.font = `${Math.max(10, W * 0.022)}px ${cssVar('--mono')}`; ctx.fillStyle = OBS_COL.label; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const ringLabel = (rad, el) => { const a = -Math.PI / 4, x = cx + Math.cos(a) * rad + 4, y = cy + Math.sin(a) * rad - 6, txt = `${Math.round(el)}°`; ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = OBS_COL.disc; ctx.strokeText(txt, x, y); ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillText(txt, x, y); ctx.restore(); };
+  for (const el of [60, 30]) {
+    const th = 90 - el; if (th >= g.maxTheta - 10) continue;
+    const rad = th / g.maxTheta * R; ctx.beginPath(); ctx.arc(cx, cy, rad, 0, TAU); ctx.stroke(); ringLabel(rad, el);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+  ringLabel(R, 90 - g.maxTheta);
+
+  // the dish in the middle
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx, cy, Math.max(3, W * 0.008), 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.arc(cx, cy, Math.max(7, W * 0.018), 0, TAU); ctx.stroke();
+
+  // compass letters (outside the disc, so they follow the page theme)
+  const note = $('#obsFrameNote');
+  if (relative) { note.textContent = t('obs.frameUt'); note.style.display = ''; }
+  else {
+    note.style.display = 'none';
+    ctx.font = `600 ${Math.max(11, W * 0.028)}px ${cssVar('--sans')}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const off = R + (W / 2 - R) / 2 + 1;
+    [['obs.n', 0, -1], ['obs.e', 1, 0], ['obs.s', 0, 1], ['obs.w', -1, 0]].forEach(([k, dx, dy]) => {
+      ctx.fillStyle = k === 'obs.n' ? cssVar('--text') : cssVar('--muted'); ctx.fillText(t(k), cx + dx * off, cy + dy * off);
+    });
+  }
+}
+/** Direction / elevation / status under the pointer. */
+function obsPointer(e) {
+  const g = state.obsGeom, cv = $('#obsCanvas'); if (!g) return;
+  const rect = cv.getBoundingClientRect(), { cx, cy, R } = obsLayout(cv);
+  const x = e.clientX - rect.left, y = e.clientY - rect.top, dx = x - cx, dy = y - cy, dist = Math.hypot(dx, dy);
+  if (dist > R + 2) { $('#obsHover').textContent = ''; return; }
+  const cell = R / (g.cols / 2), c = Math.floor(dx / cell + g.cols / 2), r = Math.floor(dy / cell + g.rows / 2);
+  const v = (r >= 0 && r < g.rows && c >= 0 && c < g.cols) ? g.snr[r * g.cols + c] : NaN;
+  const status = !Number.isFinite(v) || v < 0 ? t('legend.noData') : v < 0.5 ? t('legend.obstructed') : t('legend.clear');
+  const el = Math.round(90 - Math.min(1, dist / R) * g.maxTheta), az = Math.round((Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360);
+  const relative = /UT/i.test(g.frame) && !/EARTH/i.test(g.frame);
+  $('#obsHover').textContent = t('obs.hover', { az, el, status }) + (relative ? ' *' : '');
+}
+
+/* ---------- ROUTER ---------- */
+function renderRouter() {
+  // Response keys differ between router firmware versions — take the named one, else the first object inside.
+  const firstObj = o => (o && typeof o === 'object') ? Object.values(o).find(v => v && typeof v === 'object' && !Array.isArray(v)) : undefined;
+  const rs = state.router.status, rc = state.router.clients;
+  const st = rs?.wifiGetStatus || rs?.getStatus || firstObj(rs);
+  const cl = rc?.wifiGetClients || rc?.getClients || firstObj(rc) || (Array.isArray(st?.clients) ? { clients: st.clients } : undefined);
+  const info = state.router.info?.getDeviceInfo || state.router.info;
+  const dev = st?.deviceInfo || info?.deviceInfo || info;
+  if (dev) { $('#routerDevice').className = ''; $('#routerDevice').innerHTML = kvTable({ ...dev, uptimeS: st?.deviceState?.uptimeS }, { skipObjects: true }); }
+  if (st) {
+    const flat = {}; for (const [k, v] of Object.entries(st)) if (!['deviceInfo', 'deviceState', 'alerts', 'config'].includes(k)) flat[k] = v;
+    let html = kvTable(flat, { skipObjects: true });
+    if (st.config) html += `<h3 style="margin-top:12px">${esc(t('router.config'))}</h3>${kvTable(st.config, { skipObjects: true })}`;
+    if (st.alerts) { const a = Object.keys(st.alerts); html += `<h3 style="margin-top:12px">${esc(t('card.alerts'))}</h3>` + (a.length ? a.map(k => `<span class="chipwrap">${chip(humanKey(k), st.alerts[k] ? 'bad' : 'muted')}${infoIcon(k, humanKey(k))}</span>`).join('') : `<span class="empty">${esc(t('common.none'))}</span>`); }
+    $('#routerStatus').className = ''; $('#routerStatus').innerHTML = html;
+  }
+  if (cl) {
+    const list = cl.clients || [];
+    $('#clientCount').textContent = `${list.length}`;
+    $('#routerClients').className = '';
+    $('#routerClients').innerHTML = list.length ? `<table class="list"><tr><th>${esc(t('cl.name'))}</th><th>IP</th><th>MAC</th><th>${esc(t('cl.interface'))}</th><th>${esc(t('cl.signal'))}</th><th>Rx / Tx Mbps</th><th>${esc(t('cl.connected'))}</th></tr>` +
+      list.map(c => `<tr><td>${esc(c.name || c.hostname || '–')}</td><td>${esc(c.ipAddress || '–')}</td><td>${esc(c.macAddress || '–')}</td><td>${esc(c.iface || c.interface || '–')}</td><td>${c.signalStrength !== undefined ? esc(c.signalStrength) + ' dBm' : '–'}</td><td>${fmtNum(c.rxRateMbps, 0)} / ${fmtNum(c.txRateMbps, 0)}</td><td>${fmtDur(c.associatedTimeS)}</td></tr>`).join('') + '</table>'
+      : `<div class="empty">${esc(t('cl.none'))}</div>`;
+  }
+}
+
+/* ---------- JSON tree (Debug data) ---------- */
+function treeHTML(val, key, depth, filter) {
+  const kHtml = key !== undefined ? `<span class="k">${esc(key)}</span>` : '';
+  const keyMatch = filter && key !== undefined && String(key).toLowerCase().includes(filter);
+  if (val === null || typeof val !== 'object') {
+    if (filter && !keyMatch && !String(val).toLowerCase().includes(filter)) return '';
+    const cls = typeof val === 'number' ? 'n' : typeof val === 'boolean' ? (val ? 'bt' : 'bf') : val === null ? 'nul' : 's';
+    return `<div class="leaf">${kHtml}<span class="v ${cls}">${esc(JSON.stringify(val))}</span></div>`;
+  }
+  const isArr = Array.isArray(val);
+  if (isArr && val.length > 40 && val.every(v => v === null || isNumLike(v))) {
+    if (filter && !keyMatch) return '';
+    const st = seriesStats(val.map(toNum));
+    const summary = st ? `[${t('tree.values', { n: val.length })}] min ${fmtNum(st.min, 2)} · max ${fmtNum(st.max, 2)} · avg ${fmtNum(st.avg, 2)}` : `[${t('tree.values', { n: val.length })}]`;
+    return `<details><summary>${kHtml}<span class="meta">${esc(summary)}</span></summary><div class="leaf"><span class="v s">${esc(val.slice(0, 300).join(', '))}${val.length > 300 ? ' …' : ''}</span></div></details>`;
+  }
+  const entries = isArr ? val.map((v, i) => [i, v]) : Object.entries(val);
+  let children = entries.map(([k, v]) => treeHTML(v, k, depth + 1, filter)).filter(Boolean).join('');
+  if (filter && !children && !keyMatch) return '';
+  if (filter && !children && keyMatch) children = entries.map(([k, v]) => treeHTML(v, k, depth + 1, '')).join('');
+  const open = (depth < 2 || filter) ? ' open' : '';
+  return `<details${open}><summary>${kHtml}<span class="meta">${isArr ? `[${val.length}]` : `{${entries.length}}`}</span></summary><div class="children">${children || `<div class="leaf muted">${esc(t('tree.empty'))}</div>`}</div></details>`;
+}
+function findDeep(obj, pred, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 8) return null;
+  if (pred(obj)) return obj;
+  for (const v of Object.values(obj)) { const r = findDeep(v, pred, depth + 1); if (r) return r; }
+  return null;
+}
+function renderTree() {
+  const filter = $('#treeSearch').value.trim().toLowerCase();
+  const el = $('#tree');
+  if (!state.decoded) { el.className = 'tree empty'; el.textContent = t('tree.nothing'); return; }
+  el.className = 'tree';
+  el.innerHTML = treeHTML(state.decoded, undefined, 0, filter) || `<div class="empty">${esc(t('tree.noMatches'))}</div>`;
+}
+function decodeDebug(text, quiet = false) {
+  let obj;
+  try { obj = JSON.parse(text); }
+  catch (e) {
+    // The app sometimes wraps JSON in text — try to pull out the first {...} block.
+    const m = text.match(/\{[\s\S]*\}/); if (!m) { toast(t('dbg.invalidJson', { msg: e.message }), 'bad'); return; }
+    try { obj = JSON.parse(m[0]); } catch (e2) { toast(t('dbg.invalidJson', { msg: e2.message }), 'bad'); return; }
+  }
+  state.decoded = obj; state.decodedText = text; renderTree();
+  const status = obj.dishGetStatus || findDeep(obj, o => 'downlinkThroughputBps' in o || 'popPingLatencyMs' in o || ('alerts' in o && 'deviceInfo' in o));
+  const card = $('#debugSummaryCard');
+  if (status) {
+    const di = status.deviceInfo || findDeep(obj, o => 'softwareVersion' in o) || {};
+    const alerts = status.alerts || {}; const active = Object.keys(alerts).filter(k => alerts[k] === true);
+    card.style.display = '';
+    $('#debugSummary').innerHTML = `<div class="grid">
+      <div><h3>${esc(t('dbg.dish'))}</h3>${kvTable({ state: dishState(status), id: di.id, hardwareVersion: di.hardwareVersion, softwareVersion: di.softwareVersion, countryCode: di.countryCode, uptimeS: status.deviceState?.uptimeS,
+        downlinkThroughputBps: status.downlinkThroughputBps, uplinkThroughputBps: status.uplinkThroughputBps, popPingLatencyMs: status.popPingLatencyMs, popPingDropRate: status.popPingDropRate,
+        fractionObstructed: status.obstructionStats?.fractionObstructed, gpsSats: status.gpsStats?.gpsSats, ethSpeedMbps: status.ethSpeedMbps, softwareUpdateState: status.softwareUpdateState })}</div>
+      <div><h3>${esc(t('card.alerts'))}</h3>${active.length ? active.map(k => `<span class="chipwrap">${chip(humanKey(k), 'bad')}${infoIcon(k, humanKey(k))}</span>`).join('') : chip(t('dbg.noActiveAlerts'), 'ok')}
+        <h3 style="margin-top:12px">${esc(t('dbg.readyStates'))}</h3>${status.readyStates ? Object.entries(status.readyStates).map(([k, v]) => `<span class="chipwrap">${chip(`${k}: ${v ? t('ready.ready') : t('ready.notReady')}`, v ? 'ok' : 'bad')}${infoIcon(hasHelp('rs_' + k) ? 'rs_' + k : 'readyStates', k)}</span>`).join('') : '<span class="empty">–</span>'}
+        <h3 style="margin-top:12px">${esc(t('card.alignment'))}</h3>${kvTable(status.alignmentStats || {})}</div></div>`;
+  } else card.style.display = 'none';
+  if (!quiet) toast(status ? t('dbg.decodedDish') : t('dbg.decodedJson'), 'ok');
+}
+
+/* ---------- RAW ---------- */
+const PRESETS = {
+  dish: ['get_status', 'get_history', 'get_device_info', 'get_diagnostics', 'dish_get_obstruction_map', 'get_location', 'dish_get_context', 'dish_get_config', 'get_next_id', 'get_network_interfaces', 'get_ping', 'ping_host', 'get_connections', 'dish_get_emc', 'dish_get_data', 'get_persistent_stats'],
+  router: ['get_status', 'wifi_get_status', 'wifi_get_clients', 'wifi_get_diagnostics', 'get_device_info', 'wifi_get_config', 'wifi_get_history', 'wifi_get_ping_metrics', 'get_network_interfaces', 'get_ping'],
+};
+/** Presets = the request names the device itself reports (falls back to the built-in list). */
+async function fillPresets() {
+  const tgt = $('#rawTarget').value;
+  const show = list => { $('#rawPreset').innerHTML = list.map(p => `<option>${esc(p)}</option>`).join(''); $('#rawBody').value = JSON.stringify({ [list[0]]: {} }); };
+  show(state.fields?.[tgt] || PRESETS[tgt]);
+  if (state.fields?.[tgt]) return;
+  try {
+    const f = (await api('fields', { query: `&target=${tgt}` })).data.fields;
+    if (f?.length) {
+      const pref = PRESETS[tgt].filter(p => f.includes(p));            // familiar ones first
+      (state.fields ||= {})[tgt] = [...pref, ...f.filter(p => !pref.includes(p))];
+      if ($('#rawTarget').value === tgt) show(state.fields[tgt]);
+    }
+  } catch (_) { /* device not reachable: keep the built-in list */ }
+}
+function renderRawList() {
+  $('#rawList').innerHTML = state.calls.map((c, i) => `<div data-i="${i}"><span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</span><span>${c.t.toLocaleTimeString()}</span><span>${esc(c.cmd)}</span><span class="muted">${c.ms} ms</span></div>`).join('');
+}
+function showRaw(obj, meta = '') { $('#rawOut').textContent = JSON.stringify(obj, null, 2); $('#rawMeta').textContent = meta; }
+
+/* ---------- refresh loop ---------- */
+const activeTab = () => $('#tabs button.active').dataset.tab;
+async function refreshStatus() {
+  try {
+    const r = await api('status');
+    state.status = r.data; state.lastOk = Date.now(); state.unreachable = false;
+    renderOverview(getStatusObj(r.data)); banner('');
+  } catch (e) {
+    state.unreachable = true; $('#dot').className = 'dot bad'; $('#connState').textContent = t('conn.unreachable');
+    banner(`<strong>${esc(e.error || t('err.requestFailed'))}</strong><div class="hint">${esc(e.hint || '')}</div>`);
+  }
+}
+async function refreshHistory() {
+  const n = $('#histSamples').value;
+  try { const r = await api('history', { query: `&samples=${n}` }); state.history = r.data; renderHistory(r.data); }
+  catch (e) { if (activeTab() === 'history') toast(e.error || t('hist.failed'), 'bad'); }
+}
+async function refreshObstruction() {
+  try { const r = await api('obstruction_map'); state.obstruction = r.data; renderObstruction(r.data); }
+  catch (e) { $('#obsInfo').className = 'empty'; $('#obsInfo').textContent = e.error || t('err.failed'); }
+}
+async function refreshRouter() {
+  const jobs = [['status', 'router_status'], ['clients', 'router_clients'], ['info', 'router_info']];
+  let firstErr = null;
+  await Promise.all(jobs.map(async ([k, cmd]) => { try { state.router[k] = (await api(cmd)).data; } catch (e) { firstErr ??= e; } }));
+  renderRouter();
+  if (firstErr && !state.router.status) { $('#routerStatus').className = 'empty'; $('#routerStatus').innerHTML = `${esc(firstErr.error)}<br><span class="muted">${esc(firstErr.hint || '')}</span>`; }
+}
+async function refreshExtras() {
+  try { state.deviceInfo = (await api('device_info')).data; } catch (e) { /* optional */ }
+  try { state.context = (await api('dish_context')).data; } catch (e) { state.context = null; }
+  try { state.location = (await api('location')).data; } catch (e) { state.location = null; }
+  if (state.status) renderContext();
+}
+async function probe() {
+  $('#probe').className = 'empty'; $('#probe').textContent = t('probe.checking');
+  try { state.probe = (await api('probe')).data; renderProbe(state.probe); }
+  catch (e) { $('#probe').textContent = e.error || t('probe.failed'); }
+}
+function renderProbe(p) {
+  const g = p.grpcurl || {};
+  const row = (label, ok, txt) => `<tr><td>${esc(label)}</td><td>${chip(ok ? t('common.ok') : t('common.missing'), ok ? 'ok' : 'bad')} <span class="muted">${esc(txt || '')}</span></td></tr>`;
+  $('#probe').className = '';
+  $('#probe').innerHTML = `<table class="kv">
+    ${row('grpcurl', !!g.path, g.path ? `${g.path}${g.version ? ' · ' + g.version.split('\n')[0] : ''}` : 'brew install grpcurl')}
+    ${row(t('probe.dishTcp') + ' ' + p.dish.host, p.dish.tcp.ok, p.dish.tcp.ok ? p.dish.tcp.ms + ' ms' : p.dish.tcp.error)}
+    ${row(t('probe.routerTcp') + ' ' + p.router.host, p.router.tcp.ok, p.router.tcp.ok ? p.router.tcp.ms + ' ms' : t('probe.routerUnreachable'))}
+    ${row(t('probe.internet') + ' 1.1.1.1:443', p.internet.tcp.ok, p.internet.tcp.ok ? p.internet.tcp.ms + ' ms' : p.internet.tcp.error)}
+    ${row(t('probe.dns'), p.internet.dns, p.internet.dns ? t('probe.resolves') : t('probe.notResolving'))}
+    <tr><td>PHP</td><td>${esc(p.php)} · ${esc(p.server_time)}</td></tr></table>`;
+  if (!g.path) banner(`<strong>${esc(t('probe.noGrpcurlTitle'))}</strong><div class="hint">${t('probe.noGrpcurlHint')}</div>`, 'warn');
+}
+function schedule() {
+  clearInterval(state.timer);
+  const ms = +$('#interval').value; if (!ms) return;
+  state.timer = setInterval(async () => {
+    state.tick++;
+    await refreshStatus();
+    const tab = activeTab();
+    if (tab === 'history' || state.tick % Math.max(1, Math.round(60000 / ms)) === 0) refreshHistory();
+    if (tab === 'obstruction' && state.tick % Math.max(1, Math.round(60000 / ms)) === 0) refreshObstruction();
+    if (tab === 'router' && state.tick % Math.max(1, Math.round(30000 / ms)) === 0) refreshRouter();
+    if (state.tick % Math.max(1, Math.round(120000 / ms)) === 0) refreshExtras();
+  }, ms);
+}
+async function refreshAll() {
+  await refreshStatus();
+  refreshExtras(); refreshHistory();
+  if (activeTab() === 'obstruction') refreshObstruction();
+  if (activeTab() === 'router') refreshRouter();
+}
+
+/* ---------- header menu (burger) ---------- */
+function openMenu() { const m = $('#menuPanel'); hideTip(); m.hidden = false; $('#btnMenu').setAttribute('aria-expanded', 'true'); setTimeout(() => $('#interval').focus(), 30); }
+function closeMenu(returnFocus = false) {
+  const m = $('#menuPanel'); if (m.hidden) return;
+  m.hidden = true; $('#btnMenu').setAttribute('aria-expanded', 'false');
+  if (returnFocus) $('#btnMenu').focus();
+}
+$('#btnMenu').addEventListener('click', e => { e.stopPropagation(); $('#menuPanel').hidden ? openMenu() : closeMenu(); });
+document.addEventListener('click', e => { if (!$('#menuPanel').hidden && !e.target.closest('.menu-wrap')) closeMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#menuPanel').hidden) { e.stopPropagation(); closeMenu(true); } });
+$('#menuPanel').addEventListener('focusout', e => { if (!e.relatedTarget || !e.relatedTarget.closest?.('.menu-wrap')) setTimeout(() => { if (!$('.menu-wrap').contains(document.activeElement)) closeMenu(); }, 0); });
+$('#btnExport').addEventListener('click', () => closeMenu(true));
+
+/* ---------- "About this tab" panel ---------- */
+const GUIDE_BULLETS = { overview: 4, history: 3, obstruction: 3, router: 3, debug: 3, raw: 3 };
+let guideReturnFocus = null;
+function renderGuide() {
+  const tab = activeTab(), n = GUIDE_BULLETS[tab] || 0;
+  $('#guideTitle').textContent = t('tab.' + tab);
+  $('#guideBody').innerHTML = `<p>${esc(t(`guide.${tab}.intro`))}</p><h3>${esc(t('guide.heading'))}</h3><ul>`
+    + Array.from({ length: n }, (_, i) => `<li>${esc(t(`guide.${tab}.${i + 1}`))}</li>`).join('')
+    + `</ul><div class="oc-tip">${esc(t('guide.tip'))}</div>`;
+}
+function openGuide() {
+  const g = $('#guide'), bd = $('#guideBackdrop'); if (!g.hidden) return;
+  hideTip(); renderGuide(); guideReturnFocus = document.activeElement;
+  g.hidden = false; bd.hidden = false;
+  requestAnimationFrame(() => { g.classList.add('open'); bd.classList.add('show'); });
+  $('#btnGuide').setAttribute('aria-expanded', 'true');
+  setTimeout(() => $('#btnGuideClose').focus(), 60);
+}
+function closeGuide() {
+  const g = $('#guide'), bd = $('#guideBackdrop'); if (g.hidden) return;
+  g.classList.remove('open'); bd.classList.remove('show');
+  $('#btnGuide').setAttribute('aria-expanded', 'false');
+  setTimeout(() => { if (!g.classList.contains('open')) { g.hidden = true; bd.hidden = true; } }, 240);
+  (guideReturnFocus && guideReturnFocus.isConnected ? guideReturnFocus : $('#btnGuide')).focus();
+}
+$('#btnGuide').addEventListener('click', () => ($('#guide').hidden ? openGuide() : closeGuide()));
+$('#btnGuideClose').addEventListener('click', closeGuide);
+$('#guideBackdrop').addEventListener('click', closeGuide);
+document.addEventListener('keydown', e => {
+  if ($('#guide').hidden) return;
+  if (e.key === 'Escape' && !tipFor) { e.preventDefault(); closeGuide(); }
+  if (e.key === 'Tab') {                                  // keep focus inside the open panel
+    const f = [...$('#guide').querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])')];
+    if (!f.length) return;
+    const i = f.indexOf(document.activeElement);
+    if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+  }
+});
+
+/* ---------- confirmation dialog ---------- */
+/** Resolves true only if the person explicitly confirms. Cancel is focused by default. */
+function confirmDialog({ title, body, ok, danger = true }) {
+  const d = $('#confirmDlg');
+  if (!d || typeof d.showModal !== 'function') return Promise.resolve(window.confirm(`${title}\n\n${body}`));
+  hideTip();
+  $('#dlgTitle').textContent = title; $('#dlgBody').textContent = body;
+  $('#dlgOk').textContent = ok; $('#dlgCancel').textContent = t('dlg.cancel');
+  $('#dlgOk').className = danger ? 'danger-solid' : 'primary';
+  $('#dlgIcon').className = 'dlg-icon' + (danger ? '' : ' info');
+  return new Promise(resolve => {
+    d.returnValue = 'cancel';
+    d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true });
+    d.showModal(); $('#dlgCancel').focus();
+  });
+}
+$('#confirmDlg').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close('cancel'); }); // click outside = cancel
+const ACTION_DLG = { reboot: ['reboot', true], stow: ['stow', true], unstow: ['unstow', false], gps_on: ['gpsOn', false], gps_off: ['gpsOff', true], router_reboot: ['routerReboot', true] };
+function actionDialog(cmd) {
+  const d = ACTION_DLG[cmd];
+  return confirmDialog(d ? { title: t(`dlg.${d[0]}.title`), body: t(`dlg.${d[0]}.body`), ok: t(`dlg.${d[0]}.ok`), danger: d[1] }
+                         : { title: `${cmd}?`, body: '', ok: cmd });
+}
+/** Raw API: anything that isn't a plain read (…get_…, ping_host) may change the device. */
+const rawRiskyKey = req => Object.keys(req || {}).find(k => !/(^|_)get_/.test(k) && k !== 'ping_host');
+
+/* ---------- device on/off switches (GPS, Stow) ----------
+   Each switch mirrors the dish's own status and only changes the device after the confirmation
+   dialog. grpcurl leaves out false booleans, so a missing flag means "false". */
+const DEVICE_SWITCHES = {
+  gps: {
+    cmdOn: 'gps_on', cmdOff: 'gps_off', label: on => t(on ? 'gps.on' : 'gps.off'),
+    read(s) {
+      const g = s?.gpsStats; if (!g) return { on: null };
+      const on = !(g.inhibitGps === true || g.inhibitGps === 'true');
+      return { on, text: on ? t('gps.on') + (Number.isFinite(toNum(g.gpsSats)) ? ' · ' + t('gps.sats', { n: g.gpsSats }) : '') : t('gps.off') };
+    },
+  },
+  stow: {
+    cmdOn: 'stow', cmdOff: 'unstow', label: on => t(on ? 'stow.stowed' : 'stow.deployed'),
+    read(s) {
+      if (!s) return { on: null };
+      if (s.hasActuators === 'HAS_ACTUATORS_NO') return { on: false, locked: true, text: t('stow.noMotors') };
+      const on = s.stowRequested === true || s.stowRequested === 'true' || s.state === 'STOWED';
+      return { on, text: on ? t('stow.stowed') : t('stow.deployed') };
+    },
+  },
+};
+const swState = {};   // name -> { on, text, locked, pending }
+function syncSwitches(s) {
+  for (const [name, def] of Object.entries(DEVICE_SWITCHES)) {
+    const cur = swState[name] ||= {};
+    if (!cur.pending) Object.assign(cur, { on: null, text: '', locked: false }, def.read(s));
+  }
+  renderSwitches();
+}
+function renderSwitches() {
+  for (const name of Object.keys(DEVICE_SWITCHES)) {
+    const sw = document.getElementById(name + 'Switch'), st = document.getElementById(name + 'SwitchState'); if (!sw) continue;
+    const cur = swState[name] || { on: null };
+    sw.setAttribute('aria-checked', cur.on ? 'true' : 'false');
+    sw.disabled = cur.on === null || cur.pending || cur.locked;
+    if (cur.pending) sw.setAttribute('aria-busy', 'true'); else sw.removeAttribute('aria-busy');
+    st.textContent = cur.pending ? t('gps.pending') : cur.on === null ? t('gps.unknown') : (cur.text || '');
+    sw.title = st.textContent;
+  }
+}
+function syncGpsFromStatus(s) { syncSwitches(s); }          // kept for existing callers
+function renderGpsSwitch() { renderSwitches(); }
+for (const [name, def] of Object.entries(DEVICE_SWITCHES)) {
+  document.getElementById(name + 'Switch').addEventListener('click', async () => {
+    const cur = swState[name]; if (!cur || cur.pending || cur.locked || cur.on === null) return;
+    const cmd = cur.on ? def.cmdOff : def.cmdOn;
+    if (!(await actionDialog(cmd))) return;
+    cur.pending = true; renderSwitches();
+    try {
+      const r = await api(cmd, { method: 'POST' });
+      cur.on = cmd === def.cmdOn; cur.text = def.label(cur.on);   // until the next status read
+      toast(t('act.accepted', { cmd, ms: r.ms }), 'ok'); showRaw(r, cmd);
+    } catch (e) { toast(t('act.failed', { cmd, err: e.error }), 'bad'); showRaw(e, cmd); }
+    finally { cur.pending = false; renderSwitches(); setTimeout(refreshStatus, 1500); }   // re-read the real state
+  });
+}
+
+/* ---------- actions ---------- */
+async function runAction(cmd) {
+  if (!(await actionDialog(cmd))) return;
+  const btn = $(`[data-action="${cmd}"]`); btn.disabled = true;
+  try { const r = await api(cmd, { method: 'POST' }); toast(t('act.accepted', { cmd, ms: r.ms }), 'ok'); showRaw(r, cmd); }
+  catch (e) { toast(t('act.failed', { cmd, err: e.error }), 'bad'); showRaw(e, cmd); }
+  finally { btn.disabled = false; }
+}
+
+/* ---------- export ---------- */
+function exportSnapshot() {
+  const snap = { exportedAt: new Date().toISOString(), source: 'starlink-local-debug', ...(state.status || {}), ...(state.deviceInfo || {}), ...(state.context || {}), ...(state.history || {}), ...(state.obstruction || {}),
+    ...(state.router.status || {}), ...(state.router.clients || {}), probe: state.probe };
+  download(`starlink-snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}.json`, JSON.stringify(snap, null, 2));
+}
+
+/* ---------- wiring ---------- */
+$('#tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-tab]'); if (!b) return;
+  $$('#tabs button[data-tab]').forEach(x => x.classList.toggle('active', x === b));
+  $$('section.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + b.dataset.tab));
+  if (b.dataset.tab === 'history') { if (state.history) renderHistory(state.history); refreshHistory(); }
+  if (b.dataset.tab === 'obstruction') { if (state.obsGeom) drawObstruction(); if (!state.obstruction) refreshObstruction(); }
+  if (b.dataset.tab === 'router' && !state.router.status) refreshRouter();
+  try { localStorage.setItem('sld.tab', b.dataset.tab); } catch (_) {}
+});
+$('#interval').addEventListener('change', () => { schedule(); try { localStorage.setItem('sld.interval', $('#interval').value); } catch (_) {} });
+$('#btnRefresh').addEventListener('click', async () => {
+  const b = $('#btnRefresh'); if (b.classList.contains('spinning')) return;
+  b.classList.add('spinning'); b.setAttribute('aria-busy', 'true');
+  try { await refreshAll(); } finally { setTimeout(() => { b.classList.remove('spinning'); b.removeAttribute('aria-busy'); }, 300); }
+});
+$('#btnExport').addEventListener('click', exportSnapshot);
+$('#btnProbe').addEventListener('click', probe);
+$('#btnObs').addEventListener('click', refreshObstruction);
+$('#obsCanvas').addEventListener('pointermove', obsPointer);
+$('#obsCanvas').addEventListener('pointerdown', obsPointer);
+$('#obsCanvas').addEventListener('pointerleave', () => { $('#obsHover').textContent = ''; });
+$('#btnRouter').addEventListener('click', refreshRouter);
+$('#histSamples').addEventListener('change', refreshHistory);
+$$('[data-action]').forEach(b => b.addEventListener('click', () => runAction(b.dataset.action)));
+$('#btnDecode').addEventListener('click', () => decodeDebug($('#debugInput').value));
+$('#debugFile').addEventListener('change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { $('#debugInput').value = t; decodeDebug(t); }); });
+$('#btnUseLive').addEventListener('click', () => { const live = { ...(state.status || {}), ...(state.deviceInfo || {}), ...(state.context || {}), ...(state.history || {}) }; $('#debugInput').value = JSON.stringify(live, null, 2); decodeDebug($('#debugInput').value); });
+$('#treeSearch').addEventListener('input', renderTree);
+$('#btnExpand').addEventListener('click', () => $$('#tree details').forEach(d => d.open = true));
+$('#btnCollapse').addEventListener('click', () => $$('#tree details').forEach(d => d.open = false));
+$('#rawTarget').addEventListener('change', fillPresets);
+$('#rawPreset').addEventListener('change', () => $('#rawBody').value = JSON.stringify({ [$('#rawPreset').value]: {} }));
+$('#btnRawSend').addEventListener('click', async () => {
+  let request; try { request = JSON.parse($('#rawBody').value); } catch (e) { toast(t('raw.badJson'), 'bad'); return; }
+  const risky = rawRiskyKey(request), tgt = $('#rawTarget').value;
+  if (risky && !(await confirmDialog({ title: t('dlg.raw.title'), body: t('dlg.raw.body', { name: risky, target: t('dlg.target.' + tgt) }), ok: t('dlg.raw.ok'), danger: true }))) return;
+  const t0 = performance.now();
+  try { const r = await api('raw', { method: 'POST', body: { target: $('#rawTarget').value, request } }); showRaw(r.data, `${r.target} · ${r.ms} ms`); }
+  catch (e) { showRaw(e, t('raw.failedAfter', { ms: Math.round(performance.now() - t0) })); }
+});
+$('#rawList').addEventListener('click', e => { const d = e.target.closest('[data-i]'); if (!d) return; const c = state.calls[+d.dataset.i]; showRaw(c.res, `${c.cmd} · ${c.t.toLocaleTimeString()} · ${c.ms} ms`); });
+$('#btnCopyRaw').addEventListener('click', () => navigator.clipboard?.writeText($('#rawOut').textContent).then(() => toast(t('raw.copied'), 'ok')));
+$('#theme').addEventListener('change', () => setTheme($('#theme').value));
+$('#lang').addEventListener('change', () => setLang($('#lang').value));
+// In Auto mode, follow the OS switching between light and dark.
+window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => { if (!document.documentElement.dataset.theme) redrawCharts(); });
+window.addEventListener('resize', () => { if (state.history && activeTab() === 'history') renderHistory(state.history); if (activeTab() === 'obstruction') drawObstruction(); });
+
+/* ---------- boot ---------- */
+lang = detectLang();
+$('#lang').innerHTML = LANGS.map(l => `<option value="${l.code}">${esc(l.name)}</option>`).join('');
+$('#lang').value = lang;
+{ let mode = 'auto'; try { mode = localStorage.getItem('sld.theme') || 'auto'; } catch (_) {}
+  $('#theme').value = (mode === 'light' || mode === 'dark') ? mode : 'auto'; applyTheme($('#theme').value); }
+applyStatic();
+$('#connState').textContent = t('conn.connecting');
+renderTree();
+fillPresets();
+try {
+  const iv = localStorage.getItem('sld.interval'); if (iv !== null && $(`#interval option[value="${iv}"]`)) $('#interval').value = iv;
+  const tab = localStorage.getItem('sld.tab'); if (tab) $(`#tabs button[data-tab="${tab}"]`)?.click();
+} catch (_) {}
+probe().then(refreshAll).then(schedule);
+</script>
+</body>
+</html>
