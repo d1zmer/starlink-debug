@@ -1,0 +1,19 @@
+{
+  "name": "starlink-local-debug",
+  "private": true,
+  "description": "Self-hosted dashboard for a Starlink dish and router — test tooling only; the app itself needs no build.",
+  "license": "MIT",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:php && npm run test:e2e",
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "test:php": "php tests/php/run.php",
+    "test:e2e": "playwright test",
+    "serve": "node tests/e2e/serve.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

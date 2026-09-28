@@ -37,7 +37,8 @@ Also:
   and non-read requests from the Raw API tab). Cancel is the default.
 - **Firmware-tolerant:** request names are discovered from the device via gRPC reflection, so renamed
   requests (e.g. newer routers answering `get_status` instead of `wifi_get_status`) keep working.
-- No build step, no CDN, no tracking — plain HTML, CSS and JavaScript plus one small PHP proxy.
+- No build step, no CDN, no tracking — plain HTML, CSS and JavaScript plus one small PHP proxy
+  (Node is only needed to run the test suite).
 
 <img src="docs/guide-ukrainian.png" alt="About-this-tab panel in Ukrainian" width="720">
 
@@ -119,11 +120,32 @@ passes user input to a shell, and returns JSON to the page.
 | `i18n-help.js` | Tooltip texts for every property |
 | `i18n-guide.js` | "About this tab" panel and confirmation dialog texts |
 | `bin/` | Optional place for a local grpcurl binary |
+| `tests/` | PHP, static and browser tests (see *Tests*) |
 
 ### Adding a language
 
 Add an entry to `I18N.languages` in `i18n.js` and a block of strings in each `i18n*.js` file
 (copy the `en` block). Any missing key falls back to English.
+
+## Tests
+
+Three layers, all runnable without Starlink hardware:
+
+| Command | What it checks | Needs |
+|---|---|---|
+| `npm run test:unit` | Every language has every string, placeholders and HTML tags match, all keys used by the page exist, no external scripts | Node 20+ |
+| `npm run test:php` | `api.php` against a fake `grpcurl`: security checks (local-only, POST + header, no shell injection), history ordering, request-name discovery and caching, error hints | PHP 8.1+ |
+| `npm run test:e2e` | The real page in Chromium with a mocked dish: languages, theme, tooltips, confirmation dialogs, GPS/Stow switches, menu, guide panel, every tab, phone layout | Node 20+, Playwright |
+
+```sh
+npm install
+npx playwright install chromium   # once
+npm test                          # all three
+```
+
+`php tests/php/run.php history` runs only the PHP tests whose name contains "history";
+`npx playwright test tests/e2e/actions.spec.js` runs one browser file. GitHub Actions runs everything on
+every push (PHP 8.1–8.4), see [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
 ## Security
 

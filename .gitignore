@@ -14,3 +14,8 @@ starlink-snapshot-*.json
 *.swp
 .DS_Store
 Thumbs.db
+
+# Test tooling
+node_modules/
+test-results/
+playwright-report/
