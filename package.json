@@ -1,6 +1,6 @@
 {
-  "name": "starlink-local-debug",
-  "private": true,
+  "name": "starlink-debug",
+  "private": false,
   "description": "Self-hosted dashboard for a Starlink dish and router — test tooling only; the app itself needs no build.",
   "license": "MIT",
   "scripts": {
