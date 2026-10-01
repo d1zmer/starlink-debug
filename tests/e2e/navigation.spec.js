@@ -52,7 +52,7 @@ test.describe('tabs', () => {
   test('switching tabs shows one section at a time and is remembered', async ({ page }) => {
     await mockApi(page);
     await page.goto('/');
-    for (const tab of ['history', 'obstruction', 'router', 'debug', 'raw', 'overview']) {
+    for (const tab of ['history', 'obstruction', 'router', 'speedtest', 'debug', 'raw', 'overview']) {
       await page.locator(`[data-tab="${tab}"]`).click();
       await expect(page.locator(`#tab-${tab}`)).toBeVisible();
       await expect(page.locator('section.tab:visible')).toHaveCount(1);

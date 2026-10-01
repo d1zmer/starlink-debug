@@ -87,7 +87,7 @@ test('every literal t("…") key used in index.html exists', () => {
 
 test('templated keys (tabs, dialogs, guide) resolve for every value', () => {
   const tabs = [...html.matchAll(/data-tab="(\w+)"/g)].map(m => m[1]);
-  assert.deepEqual([...new Set(tabs)], ['overview', 'history', 'obstruction', 'router', 'debug', 'raw']);
+  assert.deepEqual([...new Set(tabs)], ['overview', 'history', 'obstruction', 'router', 'speedtest', 'debug', 'raw']);
   const bullets = JSON.parse(html.match(/const GUIDE_BULLETS = (\{[^}]+\})/)[1].replace(/(\w+):/g, '"$1":'));
   for (const tab of tabs) {
     for (const k of [`tab.${tab}`, `guide.${tab}.intro`, ...Array.from({ length: bullets[tab] }, (_, i) => `guide.${tab}.${i + 1}`)]) {

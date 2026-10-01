@@ -4,7 +4,7 @@ const { test, expect, mockApi } = require('./fixtures');
 test('no horizontal page scroll on any tab', async ({ page }) => {
   await mockApi(page);
   await page.goto('/');
-  for (const tab of ['overview', 'history', 'obstruction', 'router', 'debug', 'raw']) {
+  for (const tab of ['overview', 'history', 'obstruction', 'router', 'speedtest', 'debug', 'raw']) {
     await page.locator(`[data-tab="${tab}"]`).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), tab).toBe(true);
   }

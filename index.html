@@ -233,7 +233,38 @@
   button.danger-solid { background: var(--bad); color: #fff; border-color: transparent; font-weight: 600; }
   button.danger-solid:hover { border-color: transparent; filter: brightness(1.08); }
   @media (prefers-reduced-motion: reduce) { .offcanvas, .oc-backdrop { transition: none; } #confirmDlg[open] { animation: none; } }
-  @media (max-width: 600px) { main { padding: 12px; } header { padding: 10px 12px; } .kpi .v { font-size: 19px; } }
+  /* ---- speed test: client → internet / client → router, drawn like the app's test screen ---- */
+  .st-path { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+  .st-node { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 84px; max-width: 150px; text-align: center; }
+  .st-node svg { width: 34px; height: 34px; color: var(--muted); transition: color .2s; }
+  .st-node b { font-size: 12px; font-weight: 600; }
+  .st-node small { font-size: 11px; color: var(--muted); font-family: var(--mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-line { flex: 1; height: 3px; position: relative; border-radius: 2px; overflow: hidden;
+             background: repeating-linear-gradient(90deg, var(--line) 0 7px, transparent 7px 13px); }
+  .st-line i { position: absolute; inset: 0; opacity: 0; transform: translateX(-100%);
+               background: linear-gradient(90deg, transparent, var(--accent) 40%, var(--accent) 60%, transparent); }
+  .st-card[data-phase="latency"] .st-line i, .st-card[data-phase="down"] .st-line i, .st-card[data-phase="up"] .st-line i { opacity: 1; animation: stFlow 1.2s linear infinite; }
+  .st-card[data-phase="down"] .st-line i { animation-direction: reverse; background: linear-gradient(90deg, transparent, var(--down) 40%, var(--down) 60%, transparent); }
+  .st-card[data-phase="up"] .st-line i { background: linear-gradient(90deg, transparent, var(--up) 40%, var(--up) 60%, transparent); }
+  .st-card[data-phase="done"] .st-line { background: var(--ok); }
+  .st-card[data-phase="done"] .st-node svg { color: var(--text); }
+  .st-card[data-phase="failed"] .st-line { background: color-mix(in srgb, var(--bad) 70%, var(--line)); }
+  @keyframes stFlow { to { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .st-card .st-line i { animation: none !important; transform: none; opacity: .5; } }
+  .st-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .st-tile { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+  .st-tile .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  .st-tile .v { font-family: var(--mono); font-size: 26px; font-weight: 600; margin-top: 2px; white-space: nowrap; line-height: 1.2; }
+  .st-tile .v small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+  .st-tile .s { color: var(--muted); font-size: 12px; min-height: 1.2em; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st-tile.down .v { color: var(--down); } .st-tile.up .v { color: var(--up); } .st-tile.lat .v { color: var(--accent2); }
+  .st-tile.live { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }   /* the phase being measured right now */
+  canvas.st-chart { width: 100%; height: 64px; display: block; margin-top: 10px; }
+  .st-status { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-top: 8px; font-size: 12px; color: var(--muted); min-height: 1.4em; }
+  .st-status .err { color: var(--bad); }
+  .st-status .hint { flex-basis: 100%; }
+  #stResults td:first-child { font-family: var(--sans); }
+  @media (max-width: 600px) { main { padding: 12px; } header { padding: 10px 12px; } .kpi .v { font-size: 19px; } .st-tile .v { font-size: 20px; } .st-node { min-width: 64px; } .st-tile .l { font-size: 11px; } }
 </style>
 </head>
 <body>
@@ -270,6 +301,7 @@
   <button data-tab="history" data-i18n="tab.history">History</button>
   <button data-tab="obstruction" data-i18n="tab.obstruction">Obstruction map</button>
   <button data-tab="router" data-i18n="tab.router">Router</button>
+  <button data-tab="speedtest" data-i18n="tab.speedtest">Speed test</button>
   <button data-tab="debug" data-i18n="tab.debug">Debug data</button>
   <button data-tab="raw" data-i18n="tab.raw">Raw API</button>
   <button type="button" id="btnGuide" class="guide-btn" aria-controls="guide" aria-expanded="false" data-i18n-title="guide.open" data-i18n-aria="guide.open" title="About this tab" aria-label="About this tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M9.4 9.3a2.7 2.7 0 0 1 5.2.9c0 1.8-2.6 2.4-2.6 4"/><circle cx="12" cy="17.2" r=".6" fill="currentColor"/></svg></button>
@@ -365,6 +397,25 @@
     <div class="card"><h3 data-i18n="card.routerDevice">Router device</h3><div id="routerDevice" class="empty">–</div></div>
     <div class="card"><h3 data-i18n="card.wifi">Wi-Fi status</h3><div id="routerStatus" class="empty">–</div></div>
     <div class="card wide"><h3><span data-i18n="card.clients">Connected clients</span> <span class="spacer"></span><span id="clientCount" class="chip muted">–</span></h3><div id="routerClients" class="empty">–</div></div>
+  </div>
+</section>
+
+<!-- ============================ SPEED TEST ============================ -->
+<section class="tab" id="tab-speedtest">
+  <div class="row"><span class="muted" data-i18n="st.note">Like the Starlink app’s speed test: this browser measures download, upload and latency against Cloudflare’s speed-test servers — the same service the Starlink router uses for its own test. Nothing is sent to Starlink.</span></div>
+  <div class="grid grid-2">
+    <div class="card st-card" id="stInternet" data-phase="idle">
+      <h3><span data-i18n="st.internet">Client → Internet</span><span class="help-slot" data-help-key="st_internet"></span><span class="spacer"></span><button id="btnStInternet" data-i18n="btn.start" style="font-size:12px;padding:3px 10px">Start</button></h3>
+      <div class="st-path">
+        <div class="st-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg><b data-i18n="st.node.client">Client</b><small data-i18n="st.node.browser">this browser</small></div>
+        <div class="st-line"><i></i></div>
+        <div class="st-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><b data-i18n="st.node.internet">Internet</b><small>speed.cloudflare.com</small></div>
+      </div>
+      <div class="st-tiles" id="stInternetTiles"></div>
+      <canvas class="st-chart" id="stInternetChart"></canvas>
+      <div class="st-status" id="stInternetStatus"></div>
+    </div>
+    <div class="card"><h3><span data-i18n="st.results">Results this session</span><span class="spacer"></span><button id="btnStClear" data-i18n="st.clear" style="font-size:12px;padding:3px 8px">Clear</button></h3><div id="stResults" class="empty">–</div></div>
   </div>
 </section>
 
@@ -470,7 +521,7 @@ function setTheme(mode) {
   redrawCharts();
 }
 /** Canvas charts read CSS colours at draw time, so redraw them after a theme change. */
-function redrawCharts() { if (state.history) renderHistory(state.history); }
+function redrawCharts() { if (state.history) renderHistory(state.history); if (activeTab() === 'speedtest') renderSpeedtest(); }
 /** Re-render everything from cached data (used after a language change). */
 function rerenderAll() {
   renderGpsSwitch();
@@ -479,6 +530,7 @@ function rerenderAll() {
   if (state.history) renderHistory(state.history);
   if (state.obstruction) renderObstruction(state.obstruction);
   renderRouter();
+  renderSpeedtest();
   renderTree();
   if (state.decodedText) decodeDebug(state.decodedText, true);
   if (state.probe) renderProbe(state.probe);
@@ -601,8 +653,29 @@ function mbps(bps) { const n = toNum(bps); return Number.isFinite(n) ? (n / 1e6)
 function pct(f, d = 2) { const n = toNum(f); return Number.isFinite(n) ? (n * 100).toFixed(d) : '–'; }
 function fmtDur(s) {
   s = Math.round(toNum(s)); if (!Number.isFinite(s)) return '–';
+  const sign = s < 0 ? '-' : ''; s = Math.abs(s);   // Math.floor on a negative value would turn -5h into "-1d -5h"
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
-  if (d) return `${d}d ${h}h ${m}m`; if (h) return `${h}h ${m}m ${sec}s`; if (m) return `${m}m ${sec}s`; return `${sec}s`;
+  if (d) return `${sign}${d}d ${h}h ${m}m`; if (h) return `${sign}${h}h ${m}m ${sec}s`; if (m) return `${sign}${m}m ${sec}s`; return `${sign}${sec}s`;
+}
+/** utcOffsetS as "UTC+03:00". When it differs from the browser's zone the browser's offset is shown too: a dish
+ *  reporting another zone is usually registered to another region, which is worth noticing while debugging. */
+function fmtUtcOffset(s) {
+  const n = toNum(s); if (!Number.isFinite(n)) return '<span class="muted">–</span>';
+  const label = v => { const a = Math.abs(Math.round(v)); return `UTC${v < 0 ? '-' : '+'}${String(Math.floor(a / 3600)).padStart(2, '0')}:${String(Math.floor(a % 3600 / 60)).padStart(2, '0')}`; };
+  const here = -new Date().getTimezoneOffset() * 60;
+  return esc(label(n)) + (Math.round(n) !== here ? ` <span class="muted">(${esc(t('lbl.browserUtc', { o: label(here) }))})</span>` : '');
+}
+/** Outage start (plain text). The dish's clock reference is undocumented: current firmware has been seen reporting
+ *  values that decode to a date years in the past, so a calendar date is shown only when it is plausible;
+ *  otherwise the raw seconds are shown and labelled as the dish's own clock. Small values are relative to boot. */
+function fmtOutageStart(ns) {
+  const n = toNum(ns); if (!Number.isFinite(n)) return '–';
+  if (n > 1e17) {
+    const ms = n / 1e6;
+    if (ms >= Date.UTC(2020, 0, 1) && ms <= Date.now() + 86400e3) return new Date(ms).toLocaleString(locale());
+    return `${Math.round(n / 1e9)} s (${t('out.unsynced')})`;
+  }
+  return `${fmtDur(n / 1e9)} (${t('out.relative')})`;
 }
 function fmtAgo(s) { if (s < 60) return `${s}s`; if (s < 600) { const m = Math.floor(s / 60), r = s % 60; return r ? `${m}m${r}s` : `${m}m`; } return `${Math.round(s / 60)}m`; }
 function chip(text, cls = '') { return `<span class="chip ${cls}">${esc(text)}</span>`; }
@@ -628,7 +701,16 @@ function fmtByKey(k, v) {
     if (/Bps$/.test(key)) return `${mbps(n)} Mbps`;
     if (/Mbps$/.test(key)) return `${fmtNum(n, 0)} Mbps`;
     if (/Ms$/.test(key)) return `${fmtNum(n)} ms`;
+    if (key === 'utcOffsetS') return fmtUtcOffset(n);
+    if (key === 'startTimestampNs') return esc(fmtOutageStart(n));
     if (/(S|Seconds)$/.test(key) && !/Sats$/.test(key)) return fmtDur(n) + (Math.abs(n) < 600 && n % 1 ? ` (${n.toFixed(2)}s)` : '');
+    if (/^secondsTo/.test(key)) {
+      // Dish reports a negative value when the next slot is unknown (usually while not CONNECTED);
+      // some firmware returns an absolute Unix timestamp instead of a delta - don't render those as a duration.
+      if (n < 0) return `<span class="muted" title="raw: ${esc(String(n))}">–</span>`;
+      if (n > 31536000) return `<span title="${n > 1e9 ? esc(new Date(n * 1000).toISOString()) : 'out of range for a duration'}">${esc(String(Math.round(n)))} s</span>`;
+      return fmtDur(n) + (n % 1 ? ` (${n.toFixed(2)}s)` : '');
+    }
     if (/Deg$/.test(key)) return `${fmtNum(n)}°`;
     if (/(fraction|Rate)/i.test(key) && n >= 0 && n <= 1) return `${pct(n)} %`;
     if (/Ns$/.test(key)) return `${fmtNum(n / 1e9)} s`;
@@ -646,7 +728,9 @@ function kvTable(obj, opts = {}) {
     if (opts.skipObjects && v && typeof v === 'object') continue;
     const label = opts.labels?.[k] || humanKey(k);
     const hk = hasHelp(k) ? k : (opts.helpDefault || k);
-    rows.push(`<tr><td>${opts.noHelp ? esc(label) : withIcon(label, hk)}</td><td${String(v ?? '').length > 22 ? ' class="wrapv"' : ''}>${opts.fmt && isNumLike(v) ? esc(opts.fmt(v)) : fmtByKey(k, v)}</td></tr>`);
+    const cell = opts.fmt && isNumLike(v) ? esc(opts.fmt(v)) : fmtByKey(k, v);
+    const wrap = String(v ?? '').length > 22 || cell.replace(/<[^>]*>/g, '').length > 22;   // judge the rendered text: a short raw value can format long
+    rows.push(`<tr><td>${opts.noHelp ? esc(label) : withIcon(label, hk)}</td><td${wrap ? ' class="wrapv"' : ''}>${cell}</td></tr>`);
   }
   return rows.length ? `<table class="kv">${rows.join('')}</table>` : `<div class="empty">${esc(t('common.noData'))}</div>`;
 }
@@ -795,7 +879,7 @@ function renderHistory(data) {
   if (Array.isArray(out) && out.length) {
     $('#outages').className = '';
     $('#outages').innerHTML = `<table class="list"><tr><th>${esc(t('out.cause'))}</th><th>${esc(t('out.start'))}</th><th>${esc(t('out.duration'))}</th><th>${esc(t('out.switched'))}</th></tr>` + out.slice().reverse().map(o => {
-      const ns = toNum(o.startTimestampNs); const start = ns > 1e17 ? new Date(ns / 1e6).toLocaleString(locale()) : `${fmtDur(ns / 1e9)} (${t('out.relative')})`;
+      const start = fmtOutageStart(o.startTimestampNs);
       return `<tr><td>${fmtEnum(o.cause)}</td><td>${esc(start)}</td><td>${fmtDur(toNum(o.durationNs) / 1e9)}</td><td>${o.didSwitch ? esc(t('common.yes')) : esc(t('common.no'))}</td></tr>`;
     }).join('') + '</table>';
   } else { $('#outages').className = 'empty'; $('#outages').textContent = Array.isArray(out) ? t('out.none') : t('out.unsupported'); }
@@ -918,6 +1002,179 @@ function renderRouter() {
       list.map(c => `<tr><td>${esc(c.name || c.hostname || '–')}</td><td>${esc(c.ipAddress || '–')}</td><td>${esc(c.macAddress || '–')}</td><td>${esc(c.iface || c.interface || '–')}</td><td>${c.signalStrength !== undefined ? esc(c.signalStrength) + ' dBm' : '–'}</td><td>${fmtNum(c.rxRateMbps, 0)} / ${fmtNum(c.txRateMbps, 0)}</td><td>${fmtDur(c.associatedTimeS)}</td></tr>`).join('') + '</table>'
       : `<div class="empty">${esc(t('cl.none'))}</div>`;
   }
+}
+
+/* ---------- SPEED TEST ----------
+   Client → Internet, done the way the Starlink app does it: this browser downloads from and uploads to
+   Cloudflare's speed-test endpoints (the same service the router uses for its own test; its results
+   even carry cf-ray headers). Latency first, then parallel downloads, then parallel uploads. */
+window.SLD_SPEEDTEST = {                                     // overridable (the browser tests shorten the phases)
+  down: 'https://speed.cloudflare.com/__down', up: 'https://speed.cloudflare.com/__up', server: 'speed.cloudflare.com',
+  pings: 12, warmupPings: 2, downSeconds: 8, upSeconds: 8, downStreams: 6, upStreams: 4, downBytes: 25e6, upBytes: 8e6, warmupMs: 1000, tickMs: 200,
+};
+const ST = () => window.SLD_SPEEDTEST;
+const stBlank = () => ({ phase: 'idle', down: null, up: null, latency: null, jitter: null, loss: null, downSamples: [], upSamples: [], live: null, err: null, hint: null, at: null, meta: {} });
+state.st = { internet: stBlank(), results: [], running: null, abort: null };
+const stSleep = (ms, signal) => new Promise((res, rej) => { const id = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(id); rej(new DOMException('aborted', 'AbortError')); }, { once: true }); });
+const stMedian = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+const stJitter = a => a.length > 1 ? a.slice(1).reduce((sum, v, i) => sum + Math.abs(v - a[i]), 0) / (a.length - 1) : 0;
+const stMean = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN;
+
+/** Round-trip time to the speed-test server: small requests, server time subtracted when it reports it. */
+async function stInternetLatency(signal, onTick) {
+  const samples = [];
+  for (let i = 0; i < ST().pings; i++) {
+    const t0 = performance.now();
+    const r = await fetch(`${ST().down}?bytes=0&r=${Math.random()}`, { cache: 'no-store', signal });
+    await r.arrayBuffer();
+    let ms = performance.now() - t0;
+    const m = (r.headers.get('server-timing') || '').match(/cfRequestDuration;dur=([\d.]+)/i);
+    if (m) ms = Math.max(0.1, ms - Number(m[1]));
+    if (i >= ST().warmupPings) samples.push(ms);          // the first requests pay for DNS, TCP and TLS
+    onTick(samples, i + 1);
+  }
+  return samples;
+}
+/** Parallel streaming downloads for a fixed time; throughput is sampled every tick for the live number and the chart. */
+async function stInternetDownload(signal, onTick) {
+  const ctl = new AbortController(), stop = () => ctl.abort();
+  signal.addEventListener('abort', stop, { once: true });
+  let total = 0, running = true;
+  const worker = async () => {
+    try {
+      while (running && !ctl.signal.aborted) {
+        const r = await fetch(`${ST().down}?bytes=${ST().downBytes}&r=${Math.random()}`, { cache: 'no-store', signal: ctl.signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const reader = r.body.getReader();
+        while (running) { const { done, value } = await reader.read(); if (done) break; total += value.byteLength; }
+      }
+    } catch (e) { if (!ctl.signal.aborted) throw e; }
+  };
+  const workers = Array.from({ length: ST().downStreams }, worker);
+  try { return await stSampleLoop(() => total, ST().downSeconds, signal, onTick, workers); }
+  finally { running = false; ctl.abort(); signal.removeEventListener('abort', stop); await Promise.race([Promise.allSettled(workers), stSleep(1500)]); }
+}
+/** One upload request; progress events count the bytes handed to the network. */
+function stUploadOnce(signal, onBytes) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return resolve();
+    const xhr = new XMLHttpRequest(); let last = 0;
+    xhr.open('POST', `${ST().up}?r=${Math.random()}`);
+    const size = ST().upBytes;
+    xhr.upload.onprogress = e => { const n = Math.min(e.loaded, size); onBytes(n - last); last = n; };
+    xhr.onload = () => { onBytes(size - last); last = size; (xhr.status >= 200 && xhr.status < 400 ? resolve() : reject(new Error(`HTTP ${xhr.status}`))); };
+    xhr.onerror = () => reject(new Error('upload failed')); xhr.onabort = () => resolve();
+    signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    xhr.send(new Blob([new Uint8Array(size)]));
+  });
+}
+async function stInternetUpload(signal, onTick) {
+  const ctl = new AbortController(), stop = () => ctl.abort();
+  signal.addEventListener('abort', stop, { once: true });
+  let total = 0, running = true;
+  const worker = async () => { while (running && !ctl.signal.aborted) await stUploadOnce(ctl.signal, n => { total += n; }); };
+  const workers = Array.from({ length: ST().upStreams }, worker);
+  try { return await stSampleLoop(() => total, ST().upSeconds, signal, onTick, workers); }
+  finally { running = false; ctl.abort(); signal.removeEventListener('abort', stop); await Promise.race([Promise.allSettled(workers), stSleep(1500)]); }
+}
+/** Samples a byte counter every tick; the result is the average after the warm-up (bytes/time), plus the samples. */
+async function stSampleLoop(bytes, seconds, signal, onTick, workers) {
+  const samples = [], t0 = performance.now();
+  let lastT = t0, lastB = 0, warmB = null, warmT = null, workerErr = null;
+  workers.forEach(w => w.catch(e => { workerErr ??= e; }));
+  const deadline = t0 + seconds * 1000;
+  while (performance.now() < deadline) {
+    await stSleep(ST().tickMs, signal);
+    if (workerErr) throw workerErr;
+    const now = performance.now(), b = bytes();
+    const mbps = (b - lastB) * 8 / ((now - lastT) / 1000) / 1e6;
+    lastT = now; lastB = b; samples.push(mbps);
+    if (warmB === null && now - t0 >= ST().warmupMs) { warmB = b; warmT = now; }
+    onTick(mbps, samples);
+  }
+  const b = bytes(), now = performance.now();
+  const mbps = warmB !== null && now > warmT ? (b - warmB) * 8 / ((now - warmT) / 1000) / 1e6 : stMean(samples);
+  return { mbps, samples, bytes: b, seconds: (now - t0) / 1000 };
+}
+
+async function runInternetTest() {
+  if (state.st.running) return;
+  const ctl = new AbortController(); state.st.running = 'internet'; state.st.abort = ctl;
+  const r = state.st.internet = { ...stBlank(), phase: 'latency', meta: { server: ST().server } };
+  const started = performance.now();
+  ctl.signal.addEventListener('abort', () => { r.phase = 'cancelled'; r.live = null; renderSpeedtest(); });   // instant feedback on Stop
+  renderSpeedtest();
+  try {
+    const pings = await stInternetLatency(ctl.signal, (samples, n) => { r.live = { pings: n, of: ST().pings }; r.latency = samples.length ? stMedian(samples) : null; renderSpeedtest(); });
+    r.latency = stMedian(pings); r.jitter = stJitter(pings); r.live = null;
+    r.phase = 'down'; renderSpeedtest();
+    const d = await stInternetDownload(ctl.signal, (mbps, samples) => { r.live = mbps; r.downSamples = samples; renderSpeedtest(); });
+    r.down = d.mbps; r.downSamples = d.samples; r.meta.downBytes = d.bytes; r.live = null;
+    r.phase = 'up'; renderSpeedtest();
+    const u = await stInternetUpload(ctl.signal, (mbps, samples) => { r.live = mbps; r.upSamples = samples; renderSpeedtest(); });
+    r.up = u.mbps; r.upSamples = u.samples; r.meta.upBytes = u.bytes; r.live = null;
+    r.phase = 'done'; r.at = new Date(); r.meta.seconds = (performance.now() - started) / 1000; r.meta.streams = `${ST().downStreams}↓ ${ST().upStreams}↑`;
+    stAddResult('internet', r);
+  } catch (e) {
+    r.live = null;
+    if (e?.name === 'AbortError') { r.phase = 'cancelled'; }
+    else { r.phase = 'failed'; r.err = e?.error || e?.message || String(e); r.hint = e?.hint || t('st.errInternet'); }
+  } finally { state.st.running = null; state.st.abort = null; renderSpeedtest(); }
+}
+function stAddResult(kind, r) {
+  state.st.results.unshift({ at: r.at, kind, down: r.down, up: r.up, latency: r.latency, jitter: r.jitter, meta: { ...r.meta } });
+  state.st.results.length = Math.min(state.st.results.length, 30);
+}
+
+/** Bars for the throughput samples of a run: download first, then upload. */
+function stBars(canvas, downS, upS) {
+  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth || 400, H = canvas.clientHeight || 64;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  const all = [...downS.map(v => [v, cssVar('--down')]), ...upS.map(v => [v, cssVar('--up')])].filter(([v]) => Number.isFinite(v));
+  if (!all.length) return;
+  const max = Math.max(1, ...all.map(([v]) => v)), top = 14, bw = W / Math.max(all.length, 20);
+  ctx.strokeStyle = cssVar('--grid'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, H - .5); ctx.lineTo(W, H - .5); ctx.stroke();
+  all.forEach(([v, col], i) => { const h = Math.max(1, v / max * (H - top)); ctx.fillStyle = col; ctx.fillRect(i * bw + .5, H - h, Math.max(1, bw - 1), h); });
+  ctx.fillStyle = cssVar('--muted'); ctx.font = `10px ${cssVar('--mono')}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText(`max ${max >= 100 ? max.toFixed(0) : max.toFixed(1)} Mbps`, 2, 1);
+}
+function stTile(cls, label, helpKey, value, unit, sub, live) {
+  return `<div class="st-tile ${cls}${live ? ' live' : ''}"><div class="l">${withIcon(label, helpKey)}</div><div class="v">${esc(value)}<small>${esc(unit)}</small></div><div class="s">${esc(sub || '')}</div></div>`;
+}
+function stPhaseText(r) {
+  switch (r.phase) {
+    case 'idle': return t('st.phase.idle');
+    case 'latency': return t('st.phase.latency') + (r.live?.pings ? ` ${r.live.pings}/${r.live.of}` : '');
+    case 'down': return t('st.phase.down');
+    case 'up': return t('st.phase.up');
+    case 'cancelled': return t('st.phase.cancelled');
+    case 'failed': return '';
+    default: return [t('st.phase.done', { time: r.at ? r.at.toLocaleTimeString(locale()) : '' }), t('st.details.streams', { n: r.meta.streams }), r.meta.server].filter(Boolean).join(' · ');
+  }
+}
+function stMbps(v, live, phase, which) {
+  if (live !== null && live !== undefined && typeof live === 'number' && phase === which) return fmtNum(live);
+  return Number.isFinite(v) ? fmtNum(v) : '–';
+}
+function renderSpeedtest() {
+  const busy = !!state.st.running, i = state.st.internet;
+  $('#stInternet').dataset.phase = i.phase;
+  $('#stInternetTiles').innerHTML =
+    stTile('down', t('kpi.download'), 'st_download', stMbps(i.down, i.live, i.phase, 'down'), 'Mbps', i.phase === 'down' ? t('st.live') : (i.meta.downBytes ? t('st.bytes', { mb: (i.meta.downBytes / 1e6).toFixed(0) }) : ''), i.phase === 'down') +
+    stTile('up', t('kpi.upload'), 'st_upload', stMbps(i.up, i.live, i.phase, 'up'), 'Mbps', i.phase === 'up' ? t('st.live') : (i.meta.upBytes ? t('st.bytes', { mb: (i.meta.upBytes / 1e6).toFixed(0) }) : ''), i.phase === 'up') +
+    stTile('lat', t('kpi.latency'), 'st_latency', Number.isFinite(i.latency) ? fmtNum(i.latency) : '–', 'ms', Number.isFinite(i.jitter) ? t('st.jitter', { ms: fmtNum(i.jitter) }) : '', i.phase === 'latency');
+  stBars($('#stInternetChart'), i.downSamples, i.upSamples);
+  $('#stInternetStatus').innerHTML = i.phase === 'failed' ? `<span class="err">${esc(t('st.phase.failed', { err: i.err }))}</span>${i.hint ? `<span class="hint">${esc(i.hint)}</span>` : ''}` : `<span>${esc(stPhaseText(i))}</span>`;
+  const b = $('#btnStInternet');
+  b.textContent = busy ? t('btn.stop') : t('btn.start');
+  b.className = busy ? 'danger' : '';
+  // ---- results of this session
+  const res = state.st.results, el = $('#stResults');
+  if (!res.length) { el.className = 'empty'; el.textContent = t('st.noResults'); return; }
+  el.className = '';
+  el.innerHTML = `<table class="list"><tr><th>${esc(t('st.col.time'))}</th><th>${esc(t('kpi.download'))}</th><th>${esc(t('kpi.upload'))}</th><th>${esc(t('kpi.latency'))}</th><th>${esc(t('st.col.jitter'))}</th><th>${esc(t('st.col.details'))}</th></tr>` +
+    res.map(x => `<tr><td>${esc(x.at.toLocaleTimeString(locale()))}</td><td>${fmtNum(x.down)} Mbps</td><td>${fmtNum(x.up)} Mbps</td><td>${fmtNum(x.latency)} ms</td><td>${fmtNum(x.jitter)} ms</td><td class="muted">${esc([t('st.details.streams', { n: x.meta?.streams }), x.meta?.server].filter(Boolean).join(' · '))}</td></tr>`).join('') + '</table>';
 }
 
 /* ---------- JSON tree (Debug data) ---------- */
@@ -1093,7 +1350,7 @@ $('#menuPanel').addEventListener('focusout', e => { if (!e.relatedTarget || !e.r
 $('#btnExport').addEventListener('click', () => closeMenu(true));
 
 /* ---------- "About this tab" panel ---------- */
-const GUIDE_BULLETS = { overview: 4, history: 3, obstruction: 3, router: 3, debug: 3, raw: 3 };
+const GUIDE_BULLETS = { overview: 4, history: 3, obstruction: 3, router: 3, speedtest: 3, debug: 3, raw: 3 };
 let guideReturnFocus = null;
 function renderGuide() {
   const tab = activeTab(), n = GUIDE_BULLETS[tab] || 0;
@@ -1228,7 +1485,8 @@ async function runAction(cmd) {
 /* ---------- export ---------- */
 function exportSnapshot() {
   const snap = { exportedAt: new Date().toISOString(), source: 'starlink-local-debug', ...(state.status || {}), ...(state.deviceInfo || {}), ...(state.context || {}), ...(state.history || {}), ...(state.obstruction || {}),
-    ...(state.router.status || {}), ...(state.router.clients || {}), probe: state.probe };
+    ...(state.router.status || {}), ...(state.router.clients || {}), probe: state.probe,
+    ...(state.st.results.length ? { speedTests: state.st.results.map(r => ({ ...r, at: r.at.toISOString() })) } : {}) };
   download(`starlink-snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}.json`, JSON.stringify(snap, null, 2));
 }
 
@@ -1240,6 +1498,7 @@ $('#tabs').addEventListener('click', e => {
   if (b.dataset.tab === 'history') { if (state.history) renderHistory(state.history); refreshHistory(); }
   if (b.dataset.tab === 'obstruction') { if (state.obsGeom) drawObstruction(); if (!state.obstruction) refreshObstruction(); }
   if (b.dataset.tab === 'router' && !state.router.status) refreshRouter();
+  if (b.dataset.tab === 'speedtest') renderSpeedtest();
   try { localStorage.setItem('sld.tab', b.dataset.tab); } catch (_) {}
 });
 $('#interval').addEventListener('change', () => { schedule(); try { localStorage.setItem('sld.interval', $('#interval').value); } catch (_) {} });
@@ -1255,6 +1514,8 @@ $('#obsCanvas').addEventListener('pointermove', obsPointer);
 $('#obsCanvas').addEventListener('pointerdown', obsPointer);
 $('#obsCanvas').addEventListener('pointerleave', () => { $('#obsHover').textContent = ''; });
 $('#btnRouter').addEventListener('click', refreshRouter);
+$('#btnStInternet').addEventListener('click', () => { if (state.st.running === 'internet') state.st.abort?.abort(); else runInternetTest(); });
+$('#btnStClear').addEventListener('click', () => { state.st.results = []; renderSpeedtest(); });
 $('#histSamples').addEventListener('change', refreshHistory);
 $$('[data-action]').forEach(b => b.addEventListener('click', () => runAction(b.dataset.action)));
 $('#btnDecode').addEventListener('click', () => decodeDebug($('#debugInput').value));
@@ -1279,7 +1540,7 @@ $('#theme').addEventListener('change', () => setTheme($('#theme').value));
 $('#lang').addEventListener('change', () => setLang($('#lang').value));
 // In Auto mode, follow the OS switching between light and dark.
 window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => { if (!document.documentElement.dataset.theme) redrawCharts(); });
-window.addEventListener('resize', () => { if (state.history && activeTab() === 'history') renderHistory(state.history); if (activeTab() === 'obstruction') drawObstruction(); });
+window.addEventListener('resize', () => { if (state.history && activeTab() === 'history') renderHistory(state.history); if (activeTab() === 'obstruction') drawObstruction(); if (activeTab() === 'speedtest') renderSpeedtest(); });
 
 /* ---------- boot ---------- */
 lang = detectLang();
@@ -1290,6 +1551,7 @@ $('#lang').value = lang;
 applyStatic();
 $('#connState').textContent = t('conn.connecting');
 renderTree();
+renderSpeedtest();
 fillPresets();
 try {
   const iv = localStorage.getItem('sld.interval'); if (iv !== null && $(`#interval option[value="${iv}"]`)) $('#interval').value = iv;

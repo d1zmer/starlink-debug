@@ -21,6 +21,7 @@ A self-hosted dashboard for your Starlink dish and Wi-Fi router. It runs on your
 | **History** | Charts of throughput, latency, ping drop and power from the dish's second-by-second buffer, with a summary table and outage list |
 | **Obstruction map** | The dish's own sky map drawn like the Starlink app (north up, blue = clear, red = obstructed, black = no data), with direction/elevation read-out on hover |
 | **Router** | Starlink router details, Wi-Fi status and alerts, connected clients with signal and rates |
+| **Speed test** | Like the app's test: download, upload, latency and jitter from this browser against Cloudflare's speed-test servers (the same service the Starlink router uses for its own test), with a live chart. Results of the session are listed and included in the exported snapshot |
 | **Debug data** | Paste the debug JSON from the Starlink app, open a `.json` file or load live data → searchable tree and summary |
 | **Raw API** | Send any request to the dish or router; the preset list comes from the device itself |
 
@@ -33,12 +34,19 @@ Also:
 - **(i) tooltip on every value** explaining what it means, based on the Starlink Help Center and
   [starlink-grpc-tools](https://github.com/sparky8512/starlink-grpc-tools).
 - **"About this tab" side panel** on every tab.
+- **Outage notifications** (☰ menu → *Notify on outage*): a system notification, a short sound and a ⚠
+  in the tab title when the dish has had no connection for longer than the chosen time (10 s – 2 min),
+  and again when it comes back, with the cause and how long it was down. Everything is generated
+  locally — nothing needs the internet, which is the point. Works while the tab is open and
+  auto-refresh is on; browsers slow down polling in long-hidden tabs, so detection there can take a
+  minute or two longer.
 - **Confirmation dialog** before anything that changes the device (reboot, stow/unstow, GPS on/off,
   and non-read requests from the Raw API tab). Cancel is the default.
 - **Firmware-tolerant:** request names are discovered from the device via gRPC reflection, so renamed
   requests (e.g. newer routers answering `get_status` instead of `wifi_get_status`) keep working.
 - No build step, no CDN, no tracking — plain HTML, CSS and JavaScript plus one small PHP proxy
-  (Node is only needed to run the test suite).
+  (Node is only needed to run the test suite). The only outside server ever contacted is
+  `speed.cloudflare.com`, and only while you run the speed test.
 
 <img src="docs/guide-ukrainian.png" alt="About-this-tab panel in Ukrainian" width="720">
 
@@ -99,6 +107,8 @@ return [
 - **Location "not available"** — it needs *Advanced → Debug data → Starlink Location → allow access
   on local network* in the Starlink app, and most plans no longer expose it.
 - **Obstruction map mostly black** — the dish fills it in over several hours after a reboot.
+- **Speed test fails at once** — the browser could not reach `speed.cloudflare.com` (offline, or a
+  content blocker).
 
 ## How it works
 
@@ -109,6 +119,12 @@ browser ──HTTP──▶ api.php ──grpcurl──▶ dish 192.168.100.1:92
 
 `api.php` only runs a fixed set of named commands (or, for the Raw API tab, re-encoded JSON), never
 passes user input to a shell, and returns JSON to the page.
+
+The speed test copies the app: the Starlink app measures phone → internet itself against Cloudflare
+(`SpeedTestStats.Target = CLOUDFLARE` in the protocol). Here the browser does the same with `fetch`
+to `speed.cloudflare.com/__down` and `__up` — latency first, then parallel downloads and uploads.
+(The app's phone → router number uses `run_iperf_server` on the device, which current firmware only
+allows for the app itself, so that half is not offered here.)
 
 | File | Purpose |
 |---|---|
@@ -135,7 +151,7 @@ Three layers, all runnable without Starlink hardware:
 |---|---|---|
 | `npm run test:unit` | Every language has every string, placeholders and HTML tags match, all keys used by the page exist, no external scripts | Node 20+ |
 | `npm run test:php` | `api.php` against a fake `grpcurl`: security checks (local-only, POST + header, no shell injection), history ordering, request-name discovery and caching, error hints | PHP 8.1+ |
-| `npm run test:e2e` | The real page in Chromium with a mocked dish: languages, theme, tooltips, confirmation dialogs, GPS/Stow switches, menu, guide panel, every tab, phone layout | Node 20+, Playwright |
+| `npm run test:e2e` | The real page in Chromium with a mocked dish and a mocked speed-test server: languages, theme, tooltips, confirmation dialogs, GPS/Stow switches, menu, guide panel, every tab, the speed test, phone layout | Node 20+, Playwright |
 
 ```sh
 npm install

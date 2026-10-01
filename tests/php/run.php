@@ -319,6 +319,15 @@ test('probe: reports grpcurl, PHP and reachability', function () {
     same(DISH, $d['dish']['host']);
 });
 
+test('errors: permission denied on other requests does not talk about location', function () {
+    scenario([DISH => ['errors' => ['dish_get_config' => 'ERROR: Code: PermissionDenied Message: Permission denied']]]);
+    $r = get('dish_config');
+    same(false, $r['json']['ok']);
+    contains('"dish_get_config"', $r['json']['hint']);
+    contains('reserved for the Starlink app', $r['json']['hint']);
+    ok(!str_contains($r['json']['hint'], 'Location'));
+});
+
 // ================================================================= run
 $filter = $argv[1] ?? '';
 $passed = $failed = 0;

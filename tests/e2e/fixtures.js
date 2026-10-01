@@ -80,6 +80,28 @@ async function mockApi(page, opts = {}) {
   return { dev, posts, requests, override: (cmd, v) => { overrides[cmd] = v; } };
 }
 
+/**
+ * Mock Cloudflare's speed-test endpoints for the client → Internet test.
+ * `__down?bytes=N` answers with N bytes, `__up` swallows the upload. Returns hit counters.
+ */
+async function mockSpeedServer(page, { fail = false } = {}) {
+  const hits = { ping: 0, down: 0, up: 0 };
+  await page.route('https://speed.cloudflare.com/**', async route => {
+    if (fail) return route.abort('failed');
+    const url = new URL(route.request().url());
+    const cors = { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'server-timing' };
+    if (url.pathname === '/__up') { hits.up++; return route.fulfill({ status: 200, headers: cors, body: 'ok' }); }
+    const n = Number(url.searchParams.get('bytes') || 0);
+    if (n === 0) hits.ping++; else hits.down++;
+    return route.fulfill({ status: 200, headers: { ...cors, 'server-timing': 'cfRequestDuration;dur=0.4', 'content-type': 'application/octet-stream' }, body: Buffer.alloc(n, 48) });
+  });
+  return hits;
+}
+/** Shorten the browser-side test so it finishes in about two seconds. */
+async function quickSpeedtest(page, extra = {}) {
+  await page.evaluate(o => Object.assign(window.SLD_SPEEDTEST, o), { pings: 4, warmupPings: 1, downSeconds: 0.8, upSeconds: 0.8, downBytes: 200_000, upBytes: 100_000, warmupMs: 200, tickMs: 100, ...extra });
+}
+
 /** Change a header-menu <select> (they live inside the ☰ menu). */
 async function pick(page, id, value) {
   await page.evaluate(([i, v]) => { const s = document.getElementById(i); s.value = v; s.dispatchEvent(new Event('change')); }, [id, value]);
@@ -93,4 +115,4 @@ const test = base.extend({
   },
 });
 
-module.exports = { test, expect, mockApi, pick, makeStatus };
+module.exports = { test, expect, mockApi, mockSpeedServer, quickSpeedtest, pick, makeStatus };

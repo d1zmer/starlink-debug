@@ -85,23 +85,31 @@ function is_local_client(): bool
     );
 }
 
-function find_grpcurl(array $config): ?string
+/**
+ * Locate a helper binary (grpcurl): the configured path, ./bin/, the Homebrew prefixes,
+ * then $PATH. MAMP's PHP usually has a very short PATH, so $PATH is the last resort.
+ */
+function find_tool(array $config, string $name): ?string
 {
     $candidates = [];
-    if (!empty($config['grpcurl'])) {
-        $candidates[] = $config['grpcurl'];
+    if (!empty($config[$name])) {
+        $candidates[] = $config[$name];
     }
-    $candidates[] = __DIR__ . '/bin/grpcurl';
-    $candidates[] = '/opt/homebrew/bin/grpcurl';   // Apple Silicon Homebrew
-    $candidates[] = '/usr/local/bin/grpcurl';      // Intel Homebrew / manual
+    $candidates[] = __DIR__ . "/bin/$name";
+    $candidates[] = "/opt/homebrew/bin/$name";   // Apple Silicon Homebrew
+    $candidates[] = "/usr/local/bin/$name";      // Intel Homebrew / manual
     foreach ($candidates as $c) {
         if (is_file($c) && is_executable($c)) {
             return $c;
         }
     }
-    // MAMP's PHP usually has a very short PATH, so this is a last resort.
-    $which = trim((string) shell_exec('command -v grpcurl 2>/dev/null'));
+    $which = trim((string) shell_exec('command -v ' . escapeshellarg($name) . ' 2>/dev/null'));
     return $which !== '' ? $which : null;
+}
+
+function find_grpcurl(array $config): ?string
+{
+    return find_tool($config, 'grpcurl');
 }
 
 /**
@@ -146,7 +154,7 @@ function run_process(array $argv, int $timeoutSec): array
     return [$code, $out, $err];
 }
 
-function hint_for_error(string $target, string $err): string
+function hint_for_error(string $target, string $err, string $request = ''): string
 {
     $e = strtolower($err);
     if (str_contains($e, 'failed to dial') || str_contains($e, 'timed out')
@@ -160,9 +168,14 @@ function hint_for_error(string $target, string $err): string
              . 'route for 192.168.100.0/24 via the Starlink WAN interface.';
     }
     if (str_contains($e, 'permissiondenied') || str_contains($e, 'permission denied')) {
-        return 'The dish refused this request. Location data must be enabled in the Starlink '
-             . 'app (Advanced → Debug data → Starlink Location → allow access on local network), '
-             . 'and on many current plans it is no longer exposed at all.';
+        if ($request === '' || str_contains($request, 'location')) {
+            return 'The dish refused this request. Location data must be enabled in the Starlink '
+                 . 'app (Advanced → Debug data → Starlink Location → allow access on local network), '
+                 . 'and on many current plans it is no longer exposed at all.';
+        }
+        return "The $target knows \"$request\" but refused it (PermissionDenied): on this firmware it is "
+             . 'reserved for the Starlink app, which authenticates with a token from Starlink\'s servers. '
+             . 'It cannot be sent from here.';
     }
     if (str_contains($e, 'has no known field named')) {
         return 'The dish does not recognise that request name (grpcurl checks names against the '
@@ -211,7 +224,7 @@ function grpc_call(array $config, string $target, string $requestJson): array
         return [
             'ok'      => false,
             'error'   => $msg,
-            'hint'    => hint_for_error($target, $msg),
+            'hint'    => hint_for_error($target, $msg, (string) array_key_first((array) json_decode($requestJson, true))),
             'target'  => $host,
             'ms'      => $ms,
             'request' => json_decode($requestJson),
